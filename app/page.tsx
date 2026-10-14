@@ -17,26 +17,28 @@ import {
   ReferenceLine,
 } from "recharts";
 import {
-  Database,
   TrendingUp,
-  Activity,
-  Terminal,
   Upload,
   Download,
-  Plus,
+  Sparkles,
   CheckCircle2,
   AlertTriangle,
-  Layers,
   Play,
-  Save,
+  Copy,
+  Check,
+  Layers,
+  Activity,
   BarChart3,
+  Table as TableIcon,
+  Info,
+  PlusCircle,
+  Sliders,
 } from "lucide-react";
 
 // ============================================================================
-// 1. МАТЕМАТИЧЕСКОЕ И ЭКОНОМЕТРИЧЕСКОЕ ЯДРО (ЧИСТЫЙ TYPESCRIPT)
+// 1. МАТЕМАТИЧЕСКОЕ И СТАТИСТИЧЕСКОЕ ЯДРО
 // ============================================================================
 
-/** Логарифм гамма-функции (аппроксимация Ланцоша) для точных p-value */
 function logGamma(z: number): number {
   const c = [
     76.18009172947146, -86.50532032941677, 24.01409824083091,
@@ -49,19 +51,6 @@ function logGamma(z: number): number {
   let ser = 1.000000000190015;
   for (let j = 0; j < 6; j++) ser += c[j] / ++y;
   return -tmp + Math.log((2.5066282746310005 * ser) / x);
-}
-
-/** Регуляризованная неполная бета-функция I_x(a, b) (цепная дробь Ленца) */
-function betaInc(x: number, a: number, b: number): number {
-  if (x <= 0) return 0;
-  if (x >= 1) return 1;
-  const bt = Math.exp(
-    logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x)
-  );
-  if (x < (a + 1) / (a + b + 2)) {
-    return (bt * betaCf(x, a, b)) / a;
-  }
-  return 1 - (bt * betaCf(1 - x, b, a)) / b;
 }
 
 function betaCf(x: number, a: number, b: number): number {
@@ -97,7 +86,18 @@ function betaCf(x: number, a: number, b: number): number {
   return h;
 }
 
-/** Точные двусторонние p-value для t-критерия Стьюдента, F-критерия и Хи-квадрат */
+function betaInc(x: number, a: number, b: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const bt = Math.exp(
+    logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x)
+  );
+  if (x < (a + 1) / (a + b + 2)) {
+    return (bt * betaCf(x, a, b)) / a;
+  }
+  return 1 - (bt * betaCf(1 - x, b, a)) / b;
+}
+
 function tTestPValue(tStat: number, df: number): number {
   if (df <= 0 || isNaN(tStat)) return 1;
   const x = df / (df + tStat * tStat);
@@ -112,7 +112,6 @@ function fTestPValue(fStat: number, df1: number, df2: number): number {
 
 function chi2PValue(x: number, k: number): number {
   if (x <= 0 || k <= 0) return 1;
-  // Аппроксимация Уилсона — Хилферти для распределения Хи-квадрат
   const z = (Math.pow(x / k, 1 / 3) - (1 - 2 / (9 * k))) / Math.sqrt(2 / (9 * k));
   const t = 1 / (1 + 0.2316419 * Math.abs(z));
   const d = 0.3989423 * Math.exp((-z * z) / 2);
@@ -121,14 +120,13 @@ function chi2PValue(x: number, k: number): number {
   return z > 0 ? prob : 1 - prob;
 }
 
-function stars(p: number): string {
-  if (p < 0.01) return "***";
-  if (p < 0.05) return "**";
-  if (p < 0.1) return "*";
-  return "";
+function significanceLabel(p: number): { stars: string; text: string; color: string } {
+  if (p < 0.01) return { stars: "***", text: "Высокая (1%)", color: "text-emerald-400" };
+  if (p < 0.05) return { stars: "**", text: "Значим (5%)", color: "text-teal-400" };
+  if (p < 0.1) return { stars: "*", text: "Слабая (10%)", color: "text-amber-400" };
+  return { stars: "—", text: "Незначим", color: "text-slate-500" };
 }
 
-/** Базовые матричные операции */
 function transpose(A: number[][]): number[][] {
   return A[0].map((_, c) => A.map((r) => r[c]));
 }
@@ -147,7 +145,6 @@ function multiplyMatrices(A: number[][], B: number[][]): number[][] {
   return C;
 }
 
-/** Обращение матрицы методом Гаусса — Жордана с частичным выбором главного элемента */
 function invertMatrix(M: number[][]): number[][] {
   const n = M.length;
   const A = M.map((row, i) => [
@@ -163,7 +160,9 @@ function invertMatrix(M: number[][]): number[][] {
     [A[i], A[maxRow]] = [A[maxRow], A[i]];
 
     const pivot = A[i][i];
-    if (Math.abs(pivot) < 1e-12) throw new Error("Вырожденная матрица (строгая мультиколлинеарность)");
+    if (Math.abs(pivot) < 1e-12) {
+      throw new Error("Обнаружена строгая мультиколлинеарность (один из факторов дублирует другой).");
+    }
 
     for (let j = 0; j < 2 * n; j++) A[i][j] /= pivot;
     for (let k = 0; k < n; k++) {
@@ -176,7 +175,6 @@ function invertMatrix(M: number[][]): number[][] {
   return A.map((row) => row.slice(n, 2 * n));
 }
 
-// Интерфейс результата МНК-оценивания
 interface OLSResult {
   id: number;
   depVar: string;
@@ -191,7 +189,9 @@ interface OLSResult {
     se: number;
     tStat: number;
     pValue: number;
-    sig: string;
+    sigStars: string;
+    sigText: string;
+    sigColor: string;
   }[];
   metrics: {
     yMean: number;
@@ -205,7 +205,6 @@ interface OLSResult {
     logLik: number;
     aic: number;
     bic: number;
-    hqc: number;
     dw: number;
   };
   diagnostics: {
@@ -220,7 +219,6 @@ interface OLSResult {
   seriesData: { t: number; actual: number; fitted: number; resid: number; rowIdx: number }[];
 }
 
-/** Полный цикл оценки МНК (OLS) + робастные ошибки Уайта (HC3) + диагностические тесты */
 function estimateOLS(
   df: Record<string, (number | null)[]>,
   depVar: string,
@@ -247,7 +245,7 @@ function estimateOLS(
   }
 
   const T = validIndices.length;
-  const colNames = includeConst ? ["const", ...indepVars] : [...indepVars];
+  const colNames = includeConst ? ["Свободный член (β₀)", ...indepVars] : [...indepVars];
   const K = colNames.length;
   if (T <= K + 2) throw new Error("Недостаточно наблюдений для оценки модели.");
 
@@ -280,12 +278,10 @@ function estimateOLS(
   const s2 = ssr / dfResid;
   const seReg = Math.sqrt(s2);
 
-  // Ковариационная матрица: классическая или HC3 (Уайта)
   let covMatrix: number[][];
   if (!useHC3) {
     covMatrix = XTX_inv.map((row) => row.map((v) => v * s2));
   } else {
-    // Расчет диагонали hat-матрицы h_ii = x_i * (X'X)^(-1) * x_i'
     const meat = Array.from({ length: K }, () => Array(K).fill(0));
     for (let i = 0; i < T; i++) {
       const xi = X[i];
@@ -305,7 +301,17 @@ function estimateOLS(
   const coefficients = colNames.map((name, i) => {
     const tStat = betas[i] / se[i];
     const pValue = tTestPValue(tStat, dfResid);
-    return { name, beta: betas[i], se: se[i], tStat, pValue, sig: stars(pValue) };
+    const sig = significanceLabel(pValue);
+    return {
+      name,
+      beta: betas[i],
+      se: se[i],
+      tStat,
+      pValue,
+      sigStars: sig.stars,
+      sigText: sig.text,
+      sigColor: sig.color,
+    };
   });
 
   const r2 = Math.max(0, 1 - ssr / tss);
@@ -316,14 +322,11 @@ function estimateOLS(
   const logLik = (-T / 2) * (1 + Math.log(2 * Math.PI) + Math.log(ssr / T));
   const aic = -2 * logLik + 2 * K;
   const bic = -2 * logLik + K * Math.log(T);
-  const hqc = -2 * logLik + 2 * K * Math.log(Math.log(T));
 
-  // Статистика Дарбина — Уотсона
   let dwNum = 0;
   for (let i = 1; i < T; i++) dwNum += Math.pow(resid[i] - resid[i - 1], 2);
   const dw = dwNum / ssr;
 
-  // 1. Факторы инфляции дисперсии (VIF)
   const vif: { name: string; value: number }[] = [];
   if (indepVars.length > 1) {
     for (let j = 0; j < indepVars.length; j++) {
@@ -349,14 +352,13 @@ function estimateOLS(
         const r2j = Math.max(0, 1 - tSSR / tTSS);
         vif.push({ name: indepVars[j], value: 1 / Math.max(1 - r2j, 1e-6) });
       } catch {
-        vif.push({ name: indepVars[j], value: 999.9 });
+        vif.push({ name: indepVars[j], value: 99.9 });
       }
     }
   } else if (indepVars.length === 1) {
     vif.push({ name: indepVars[0], value: 1.0 });
   }
 
-  // 2. Тест Бреуша — Пагана (LM = T * R^2 вспомогательной регрессии u^2 на X)
   let bpLM = 0,
     bpPval = 1;
   try {
@@ -374,7 +376,6 @@ function estimateOLS(
     bpLM = 0;
   }
 
-  // 3. Тест Жарка — Бера на нормальность остатков
   const rMean = resid.reduce((a, b) => a + b, 0) / T;
   const m2 = resid.reduce((a, e) => a + Math.pow(e - rMean, 2), 0) / T;
   const m3 = resid.reduce((a, e) => a + Math.pow(e - rMean, 3), 0) / T;
@@ -384,7 +385,6 @@ function estimateOLS(
   const jbStat = (T / 6) * (Math.pow(skew, 2) + Math.pow(kurt - 3, 2) / 4);
   const jbPval = chi2PValue(jbStat, 2);
 
-  // 4. Тест Рамсея (RESET) с квадратом расчетных значений Y_hat^2
   let resetF = 0,
     resetPval = 1;
   try {
@@ -424,7 +424,6 @@ function estimateOLS(
       logLik,
       aic,
       bic,
-      hqc,
       dw,
     },
     diagnostics: { vif, bpLM, bpPval, jbStat, jbPval, resetF, resetPval },
@@ -438,14 +437,14 @@ function estimateOLS(
   };
 }
 
-/** Расчет цепей Маркова: квантильная разбивка, матрица P_ij, прогноз P^t и вектор эргодичности pi */
 function computeMarkovChain(series: (number | null)[], steps = 6) {
   const clean = series.filter((v): v is number => v !== null && !isNaN(v));
   const sorted = [...clean].sort((a, b) => a - b);
   const q1 = sorted[Math.floor(sorted.length / 3)];
   const q2 = sorted[Math.floor((2 * sorted.length) / 3)];
 
-  const labels = ["S1 (Спад)", "S2 (Стагнация)", "S3 (Рост)"];
+  const labels = ["Фаза 1 (Низкие значения)", "Фаза 2 (Умеренные)", "Фаза 3 (Высокие значения)"];
+  const shortLabels = ["S1 (Спад)", "S2 (Стагнация)", "S3 (Рост)"];
   const getState = (v: number) => (v <= q1 ? 0 : v <= q2 ? 1 : 2);
   const states = clean.map(getState);
 
@@ -475,14 +474,13 @@ function computeMarkovChain(series: (number | null)[], steps = 6) {
     }
     sVec = nextVec;
     forecast.push({
-      step: `t + ${step}`,
+      step: `Период +${step}`,
       S1: Number((sVec[0] * 100).toFixed(2)),
       S2: Number((sVec[1] * 100).toFixed(2)),
       S3: Number((sVec[2] * 100).toFixed(2)),
     });
   }
 
-  // Стационарное (эргодическое) распределение pi * P = pi (сходимость P^50)
   let pi = [1 / 3, 1 / 3, 1 / 3];
   for (let iter = 0; iter < 60; iter++) {
     const nextPi = [0, 0, 0];
@@ -494,20 +492,20 @@ function computeMarkovChain(series: (number | null)[], steps = 6) {
 
   return {
     labels,
+    shortLabels,
     bounds: [
-      `[${sorted[0].toFixed(2)}; ${q1.toFixed(2)}]`,
-      `(${q1.toFixed(2)}; ${q2.toFixed(2)}]`,
-      `(${q2.toFixed(2)}; ${sorted[sorted.length - 1].toFixed(2)}]`,
+      `от ${sorted[0].toFixed(2)} до ${q1.toFixed(2)}`,
+      `от ${q1.toFixed(2)} до ${q2.toFixed(2)}`,
+      `от ${q2.toFixed(2)} до ${sorted[sorted.length - 1].toFixed(2)}`,
     ],
     counts,
     P,
-    currentState: labels[currentStateIdx],
+    currentState: shortLabels[currentStateIdx],
     forecast,
     stationary: pi,
   };
 }
 
-/** Расширенный тест Дики — Фуллера (ADF) с константой и трендом: dY_t = a + b*t + gamma*Y_{t-1} + e_t */
 function computeADF(series: (number | null)[]) {
   const y = series.filter((v): v is number => v !== null && !isNaN(v));
   const dy: number[] = [];
@@ -532,20 +530,18 @@ function computeADF(series: (number | null)[]) {
     constModel: {
       tau: tauC,
       crit5: -2.91,
-      crit1: -3.54,
       stationary: tauC < -2.91,
     },
     trendModel: {
       tau: tauCT,
       crit5: -3.49,
-      crit1: -4.12,
       stationary: tauCT < -3.49,
     },
   };
 }
 
 // ============================================================================
-// 2. ГЕНЕРАЦИЯ ДЕМОНСТРАЦИОННОГО МАКРОЭКОНОМИЧЕСКОГО ДАТАСЕТА (60 КВАРТАЛОВ)
+// 2. НАЧАЛЬНЫЙ НАБОР МАКРОЭКОНОМИЧЕСКИХ ДАННЫХ
 // ============================================================================
 function createInitialDataset() {
   const n = 60;
@@ -557,7 +553,6 @@ function createInitialDataset() {
     Inflation: [],
   };
 
-  // Детерминированный псевдослучайный генератор для воспроизводимости
   let seed = 42;
   const rand = () => {
     seed = (seed * 1664525 + 1013904223) % 4294967296;
@@ -590,25 +585,27 @@ function createInitialDataset() {
     Investment: "Инвестиции в основной капитал (% к ВВП)",
     KeyRate: "Ключевая ставка ЦБ (% годовых)",
     LaborProd: "Индекс производительности труда (база = 100)",
-    Inflation: "Инфляция ИПЦ (%, г/г)",
+    Inflation: "Уровень инфляции ИПЦ (%, г/г)",
   };
 
   return { df, descriptions };
 }
 
 // ============================================================================
-// 3. ГЛАВНЫЙ КОМПОНЕНТ ВЕБ-ПРИЛОЖЕНИЯ NEXTGRETL
+// 3. ГЛАВНЫЙ КОМПОНЕНТ ИНТЕРФЕЙСА TED ANALYTICS
 // ============================================================================
-export default function NextGretlWorkspace() {
+export default function TedAnalyticsStudio() {
   const initial = useMemo(() => createInitialDataset(), []);
   const [df, setDf] = useState<Record<string, (number | null)[]>>(initial.df);
   const [descriptions, setDescriptions] = useState<Record<string, string>>(initial.descriptions);
 
-  // Выбранные переменные в левой панели gretl
-  const [selectedVars, setSelectedVars] = useState<string[]>(["GDP_Growth", "Investment", "KeyRate"]);
+  const [selectedVars, setSelectedVars] = useState<string[]>([
+    "GDP_Growth",
+    "Investment",
+    "KeyRate",
+  ]);
   const [activeTab, setActiveTab] = useState<"ols" | "markov" | "timeseries" | "data">("ols");
 
-  // Параметры окна МНК (OLS)
   const [depVar, setDepVar] = useState<string>("GDP_Growth");
   const [regressors, setRegressors] = useState<string[]>(["Investment", "KeyRate", "LaborProd"]);
   const [useHC3, setUseHC3] = useState<boolean>(false);
@@ -624,20 +621,16 @@ export default function NextGretlWorkspace() {
   ]);
   const [activeModelId, setActiveModelId] = useState<number>(1);
 
-  // Параметры вкладок Цепи Маркова и Временные ряды
   const [markovVar, setMarkovVar] = useState<string>("GDP_Growth");
   const [tsVar, setTsVar] = useState<string>("GDP_Growth");
-
-  // Нижняя командная строка hansl
-  const [cmdInput, setCmdInput] = useState<string>("");
-  const [statusMsg, setStatusMsg] = useState<string>(
-    "Готово. Рабочий набор: 60 наблюдений (квартальные макроданные)."
+  const [copiedReport, setCopiedReport] = useState<boolean>(false);
+  const [toastMsg, setToastMsg] = useState<string>(
+    "Загружена демонстрационная выборка (60 кварталов). Выберите факторы или загрузите свой CSV."
   );
 
   const varNames = Object.keys(df);
   const activeModel = models.find((m) => m.id === activeModelId) || models[models.length - 1];
 
-  // Расчет базовых метрик для реестра переменных
   const varStats = useMemo(() => {
     return varNames.map((name, idx) => {
       const clean = df[name].filter((v): v is number => v !== null && !isNaN(v));
@@ -650,7 +643,7 @@ export default function NextGretlWorkspace() {
       return {
         id: idx + 1,
         name,
-        desc: descriptions[name] || "Пользовательский ряд",
+        desc: descriptions[name] || "Производный показатель",
         mean,
         std,
         n,
@@ -658,18 +651,16 @@ export default function NextGretlWorkspace() {
     });
   }, [df, descriptions, varNames]);
 
-  // Переключение выбора переменной в списке
   const toggleSelectVar = (name: string) => {
     setSelectedVars((prev) =>
       prev.includes(name) ? prev.filter((v) => v !== name) : [...prev, name]
     );
   };
 
-  // Быстрые трансформации gretl (l_, d_, _1, sq_, pch_)
-  const applyTransformation = (mode: "log" | "diff" | "lag1" | "sq" | "pch", targets?: string[]) => {
-    const varsToUse = targets && targets.length > 0 ? targets : selectedVars;
-    if (varsToUse.length === 0) {
-      setStatusMsg("Выберите хотя бы одну переменную в левом списке для трансформации.");
+  // Преобразования показателей с понятными уведомлениями
+  const applyTransformation = (mode: "log" | "diff" | "lag1" | "sq" | "pch") => {
+    if (selectedVars.length === 0) {
+      setToastMsg("Отметьте галочкой хотя бы один показатель в списке слева.");
       return;
     }
 
@@ -677,81 +668,81 @@ export default function NextGretlWorkspace() {
     const nextDesc = { ...descriptions };
     const created: string[] = [];
 
-    for (const col of varsToUse) {
+    for (const col of selectedVars) {
       const series = df[col];
       if (!series) continue;
 
       if (mode === "log") {
-        const newName = `l_${col}`;
-        nextDf[newName] = series.map((v) => (v !== null && v > 0 ? Number(Math.log(v).toFixed(5)) : null));
-        nextDesc[newName] = `= log(${col})`;
+        const newName = `ln_${col}`;
+        nextDf[newName] = series.map((v) =>
+          v !== null && v > 0 ? Number(Math.log(v).toFixed(5)) : null
+        );
+        nextDesc[newName] = `Натуральный логарифм ln(${col})`;
         created.push(newName);
       } else if (mode === "diff") {
-        const newName = `d_${col}`;
+        const newName = `diff_${col}`;
         nextDf[newName] = series.map((v, i) =>
           i > 0 && v !== null && series[i - 1] !== null
             ? Number((v - (series[i - 1] as number)).toFixed(5))
             : null
         );
-        nextDesc[newName] = `= ${col}(t) - ${col}(t-1)`;
+        nextDesc[newName] = `Первая разность Δ${col}`;
         created.push(newName);
       } else if (mode === "lag1") {
-        const newName = `${col}_1`;
+        const newName = `lag_${col}`;
         nextDf[newName] = series.map((_, i) => (i > 0 ? series[i - 1] : null));
-        nextDesc[newName] = `= ${col}(t-1)`;
+        nextDesc[newName] = `Значение за прошлый период ${col}(t-1)`;
         created.push(newName);
       } else if (mode === "sq") {
         const newName = `sq_${col}`;
         nextDf[newName] = series.map((v) => (v !== null ? Number((v * v).toFixed(5)) : null));
-        nextDesc[newName] = `= ${col}^2`;
+        nextDesc[newName] = `Квадрат показателя (${col})²`;
         created.push(newName);
       } else if (mode === "pch") {
-        const newName = `pch_${col}`;
+        const newName = `gr_${col}`;
         nextDf[newName] = series.map((v, i) =>
           i > 0 && v !== null && series[i - 1] !== null && series[i - 1] !== 0
-            ? Number((((v - (series[i - 1] as number)) / Math.abs(series[i - 1] as number)) * 100).toFixed(4))
+            ? Number(
+                (
+                  ((v - (series[i - 1] as number)) / Math.abs(series[i - 1] as number)) *
+                  100
+                ).toFixed(4)
+              )
             : null
         );
-        nextDesc[newName] = `Темп прироста ${col} (%)`;
+        nextDesc[newName] = `Цепной темп прироста ${col} (%)`;
         created.push(newName);
       }
     }
 
     setDf(nextDf);
     setDescriptions(nextDesc);
-    setStatusMsg(`Добавлены трансформированные ряды: ${created.join(", ")}`);
+    setToastMsg(`Созданы новые показатели: ${created.join(", ")}`);
   };
 
-  // Оценка новой МНК-модели
-  const handleRunOLS = (
-    customY?: string,
-    customX?: string[],
-    customHC3?: boolean
-  ) => {
-    const targetY = customY || depVar;
-    const targetX = (customX || regressors).filter((x) => x !== targetY);
-    const hc3Flag = customHC3 !== undefined ? customHC3 : useHC3;
-
+  const handleRunOLS = () => {
+    const targetX = regressors.filter((x) => x !== depVar);
     if (targetX.length === 0) {
-      setStatusMsg("Ошибка: выберите хотя бы один независимый регрессор X.");
+      setToastMsg("Выберите хотя бы один объясняющий фактор (X) для построения модели.");
       return;
     }
 
     try {
       const nextId = models.length + 1;
-      const res = estimateOLS(df, targetY, targetX, true, hc3Flag, nextId);
+      const res = estimateOLS(df, depVar, targetX, true, useHC3, nextId);
       setModels((prev) => [...prev, res]);
       setActiveModelId(nextId);
       setActiveTab("ols");
-      setStatusMsg(
-        `Оценена Модель ${nextId} (МНК: ${targetY} от ${targetX.join(", ")}). R² = ${(res.metrics.r2 * 100).toFixed(2)}%`
+      setToastMsg(
+        `Модель №${nextId} успешно рассчитана! Объясняющая способность R² = ${(
+          res.metrics.r2 * 100
+        ).toFixed(1)}%`
       );
     } catch (err: unknown) {
-      setStatusMsg(`Ошибка расчетов МНК: ${err instanceof Error ? err.message : String(err)}`);
+      setToastMsg(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  // Сохранение остатков uhat или прогноза yhat обратно в датасет (как в gretl)
   const saveModelSeriesToDf = (type: "resid" | "fitted") => {
     if (!activeModel) return;
     const totalLen = df[activeModel.depVar].length;
@@ -761,18 +752,99 @@ export default function NextGretlWorkspace() {
       newCol[pt.rowIdx] = type === "resid" ? pt.resid : pt.fitted;
     }
 
-    const colName = type === "resid" ? `uhat${activeModel.id}` : `yhat${activeModel.id}`;
+    const colName =
+      type === "resid" ? `Остатки_М${activeModel.id}` : `Прогноз_М${activeModel.id}`;
     const colDesc =
       type === "resid"
-        ? `Остатки Модели ${activeModel.id} (${activeModel.depVar})`
-        : `Расчетные значения Модели ${activeModel.id} (${activeModel.depVar})`;
+        ? `Ошибки (остатки) Модели №${activeModel.id} для ${activeModel.depVar}`
+        : `Расчетные значения Модели №${activeModel.id} для ${activeModel.depVar}`;
 
     setDf((prev) => ({ ...prev, [colName]: newCol }));
     setDescriptions((prev) => ({ ...prev, [colName]: colDesc }));
-    setStatusMsg(`Ряд '${colName}' успешно добавлен в реестр переменных.`);
+    setToastMsg(`Показатель «${colName}» сохранен в общий список переменных слева.`);
   };
 
-  // Загрузка пользовательского CSV-файла
+  // Формирование уравнения регрессии в читаемом виде
+  const formattedEquation = useMemo(() => {
+    if (!activeModel) return "";
+    const parts: string[] = [];
+    activeModel.coefficients.forEach((c, idx) => {
+      const val = Math.abs(c.beta).toFixed(4);
+      const sign = c.beta >= 0 ? (idx === 0 ? "" : " + ") : idx === 0 ? "-" : " - ";
+      if (idx === 0) {
+        parts.push(`${sign}${val}`);
+      } else {
+        parts.push(`${sign}${val} · ${c.name}`);
+      }
+    });
+    return `${activeModel.depVar} = ${parts.join("")}`;
+  }, [activeModel]);
+
+  // Генерация автоматических выводов на русском языке для курсовой/отчета
+  const autoConclusions = useMemo(() => {
+    if (!activeModel) return [];
+    const notes: string[] = [];
+    const r2Pct = (activeModel.metrics.r2 * 100).toFixed(2);
+    notes.push(
+      `Вариация показателя «${activeModel.depVar}» на ${r2Pct}% объясняется включенными в модель факторами (скорректированный R² = ${(
+        activeModel.metrics.adjR2 * 100
+      ).toFixed(2)}%).`
+    );
+
+    if (activeModel.metrics.fPval < 0.05) {
+      notes.push(
+        `По F-критерию Фишера (F = ${activeModel.metrics.fStat.toFixed(
+          2
+        )}, p < 0.05) уравнение регрессии в целом статистически значимо и надежно.`
+      );
+    } else {
+      notes.push(
+        `Внимание: по F-критерию Фишера (F = ${activeModel.metrics.fStat.toFixed(
+          2
+        )}) модель в целом статистически незначима. Рекомендуется пересмотреть набор факторов.`
+      );
+    }
+
+    activeModel.coefficients.slice(1).forEach((c) => {
+      const dir = c.beta >= 0 ? "увеличивается" : "снижается";
+      if (c.pValue < 0.05) {
+        notes.push(
+          `Фактор «${c.name}» оказывает статистически значимое влияние (p = ${
+            c.pValue < 0.0001 ? c.pValue.toExponential(2) : c.pValue.toFixed(4)
+          }): при росте «${c.name}» на 1 ед. показатель «${
+            activeModel.depVar
+          }» в среднем ${dir} на ${Math.abs(c.beta).toFixed(4)} ед. при неизменности прочих факторов.`
+        );
+      } else {
+        notes.push(
+          `Влияние фактора «${c.name}» оказалось статистически незначимым (p = ${c.pValue.toFixed(
+            3
+          )} > 0.05) — его можно исключить для упрощения модели.`
+        );
+      }
+    });
+
+    return notes;
+  }, [activeModel]);
+
+  const copyReportToClipboard = () => {
+    if (!activeModel) return;
+    const text = [
+      `ОТЧЕТ ПО ЭКОНОМЕТРИЧЕСКОЙ МОДЕЛИ №${activeModel.id}`,
+      `Зависимая переменная: ${activeModel.depVar} (объем выборки N = ${activeModel.nObs})`,
+      `Уравнение регрессии: ${formattedEquation}`,
+      `R² = ${activeModel.metrics.r2.toFixed(4)} | Скорр. R² = ${activeModel.metrics.adjR2.toFixed(4)} | F = ${activeModel.metrics.fStat.toFixed(2)}`,
+      "",
+      "АНАЛИТИЧЕСКИЕ ВЫВОДЫ:",
+      ...autoConclusions.map((line, i) => `${i + 1}. ${line}`),
+    ].join("\n");
+
+    navigator.clipboard.writeText(text);
+    setCopiedReport(true);
+    setToastMsg("Готовый текстовый отчет скопирован в буфер обмена!");
+    setTimeout(() => setCopiedReport(false), 2500);
+  };
+
   const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -792,7 +864,7 @@ export default function NextGretlWorkspace() {
 
       headers.forEach((h) => {
         newDf[h] = [];
-        newDesc[h] = `Импорт из ${file.name}`;
+        newDesc[h] = `Загружено из файла ${file.name}`;
       });
 
       for (let i = 1; i < lines.length; i++) {
@@ -804,12 +876,11 @@ export default function NextGretlWorkspace() {
         });
       }
 
-      // Оставляем только числовые столбцы
       const numericHeaders = headers.filter((h) =>
         newDf[h].some((v) => v !== null && !isNaN(v))
       );
       if (numericHeaders.length === 0) {
-        setStatusMsg("Ошибка: в CSV не найдено числовых столбцов.");
+        setToastMsg("Ошибка: в файле не найдено числовых колонок.");
         return;
       }
 
@@ -823,12 +894,13 @@ export default function NextGretlWorkspace() {
       setRegressors(numericHeaders.slice(1, 4));
       setMarkovVar(numericHeaders[0]);
       setTsVar(numericHeaders[0]);
-      setStatusMsg(`Импортирован файл ${file.name}: ${lines.length - 1} набл., ${numericHeaders.length} перем.`);
+      setToastMsg(
+        `Загружен файл «${file.name}»: ${lines.length - 1} строк, ${numericHeaders.length} показателей.`
+      );
     };
     reader.readAsText(file);
   };
 
-  // Экспорт текущего датасета в CSV
   const exportToCSV = () => {
     const cols = Object.keys(df);
     const nRows = df[cols[0]].length;
@@ -840,47 +912,10 @@ export default function NextGretlWorkspace() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "nextgretl_dataset.csv";
+    a.download = "ted_analytics_data.csv";
     a.click();
   };
 
-  // Исполнение команд консоли hansl
-  const handleHanslCommand = (e: React.FormEvent) => {
-    e.preventDefault();
-    const raw = cmdInput.trim();
-    if (!raw) return;
-    setCmdInput("");
-
-    const parts = raw.split(/\s+/);
-    const cmd = parts[0].toLowerCase();
-    const args = parts.slice(1).filter((a) => a !== "const" && df[a] !== undefined);
-
-    if (cmd === "ols" && args.length >= 2) {
-      setDepVar(args[0]);
-      setRegressors(args.slice(1));
-      handleRunOLS(args[0], args.slice(1));
-    } else if ((cmd === "logs" || cmd === "log") && args.length >= 1) {
-      applyTransformation("log", args);
-    } else if (cmd === "diff" && args.length >= 1) {
-      applyTransformation("diff", args);
-    } else if (cmd === "square" && args.length >= 1) {
-      applyTransformation("sq", args);
-    } else if (cmd === "markov" && args.length >= 1) {
-      setMarkovVar(args[0]);
-      setActiveTab("markov");
-      setStatusMsg(`Построена цепь Маркова для ${args[0]}`);
-    } else if (cmd === "adf" && args.length >= 1) {
-      setTsVar(args[0]);
-      setActiveTab("timeseries");
-      setStatusMsg(`Выполнен ADF-тест стационарности для ${args[0]}`);
-    } else {
-      setStatusMsg(
-        "Синтаксис hansl: ols Y X1 X2 | logs X1 | diff X1 | square X1 | markov Y | adf Y"
-      );
-    }
-  };
-
-  // Вычисляем результаты Маркова и ADF
   const markovResult = useMemo(
     () => computeMarkovChain(df[markovVar] || df[varNames[0]]),
     [df, markovVar, varNames]
@@ -890,7 +925,6 @@ export default function NextGretlWorkspace() {
     [df, tsVar, varNames]
   );
 
-  // Данные для мульти-графика временных рядов
   const multiSeriesChartData = useMemo(() => {
     const len = df[varNames[0]].length;
     const vars = selectedVars.length > 0 ? selectedVars : [varNames[0]];
@@ -902,136 +936,142 @@ export default function NextGretlWorkspace() {
   }, [df, selectedVars, varNames]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* ВЕРХНЯЯ ПАНЕЛЬ (ШАПКА GRETL STUDIO) */}
-      <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur px-6 py-3 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30">
+      {/* ВЕРХНЯЯ ШАПКА ПРИЛОЖЕНИЯ */}
+      <header className="border-b border-slate-800/80 bg-slate-900/90 backdrop-blur sticky top-0 z-20 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
             <TrendingUp className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-base font-bold tracking-tight text-white flex items-center gap-2">
-              NextGretl
-              <span className="text-xs font-mono uppercase px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                Econometric Studio
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-lg font-bold tracking-tight text-white">
+                TED Analytics
+              </h1>
+              <span className="text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                Эконометрическая лаборатория
               </span>
-            </h1>
+            </div>
             <p className="text-xs text-slate-400">
-              МНК (OLS + HC3) • Диагностика Гаусса — Маркова • ADF • Цепи Маркова
+              Регрессионный анализ • Проверка гипотез • Прогнозирование временных рядов и цепей Маркова
             </p>
           </div>
         </div>
 
-        {/* Кнопки импорта и экспорта CSV */}
         <div className="flex items-center gap-2.5">
-          <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
-            <Upload className="w-3.5 h-3.5 text-indigo-400" />
-            Импорт CSV
+          <label className="cursor-pointer inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition shadow-sm">
+            <Upload className="w-4 h-4 text-indigo-400" />
+            Загрузить свой CSV
             <input type="file" accept=".csv" onChange={handleCSVUpload} className="hidden" />
           </label>
           <button
             onClick={exportToCSV}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition shadow-sm"
           >
-            <Download className="w-3.5 h-3.5 text-emerald-400" />
-            Экспорт CSV
+            <Download className="w-4 h-4 text-emerald-400" />
+            Скачать таблицу CSV
           </button>
         </div>
       </header>
 
-      {/* ОСНОВНАЯ РАБОЧАЯ ОБЛАСТЬ (ЛЕВЫЙ РЕЕСТР ПЕРЕМЕННЫХ + ПРАВЫЕ ВКЛАДКИ) */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-hidden">
-        {/* ЛЕВАЯ КОЛОНКА: РЕЕСТР ПЕРЕМЕННЫХ КАК В GRETL */}
-        <aside className="lg:col-span-4 xl:col-span-3 border-r border-slate-800 bg-slate-900/50 flex flex-col">
-          <div className="p-3.5 border-b border-slate-800 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Database className="w-3.5 h-3.5 text-indigo-400" />
-              Реестр переменных ({varNames.length + 1})
-            </span>
-            <span className="text-[11px] text-slate-500">Клик для выбора</span>
-          </div>
+      {/* ИНФОРМАЦИОННАЯ ПОДСКАЗКА (TOAST BANNER) */}
+      <div className="bg-indigo-950/40 border-b border-indigo-500/20 px-6 py-2 flex items-center justify-between gap-4 text-xs text-indigo-200">
+        <div className="flex items-center gap-2">
+          <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+          <span>{toastMsg}</span>
+        </div>
+        <span className="text-[11px] text-slate-400 hidden sm:inline">
+          Объем выборки: {df[varNames[0]].length} периодов
+        </span>
+      </div>
 
-          {/* Панель быстрых трансформаций («Меню Добавить» в gretl) */}
-          <div className="px-3 py-2 bg-slate-900/90 border-b border-slate-800 flex flex-wrap gap-1.5">
-            <button
-              onClick={() => applyTransformation("log")}
-              title="Натуральный логарифм выбранных переменных"
-              className="px-2 py-1 text-[11px] font-mono rounded bg-slate-800 hover:bg-indigo-600/30 hover:border-indigo-500/50 border border-slate-700 text-slate-200 transition"
-            >
-              + log (l_)
-            </button>
-            <button
-              onClick={() => applyTransformation("diff")}
-              title="Первые разности выбранных переменных"
-              className="px-2 py-1 text-[11px] font-mono rounded bg-slate-800 hover:bg-indigo-600/30 hover:border-indigo-500/50 border border-slate-700 text-slate-200 transition"
-            >
-              + diff (d_)
-            </button>
-            <button
-              onClick={() => applyTransformation("lag1")}
-              title="Лаг 1-го порядка (t-1)"
-              className="px-2 py-1 text-[11px] font-mono rounded bg-slate-800 hover:bg-indigo-600/30 hover:border-indigo-500/50 border border-slate-700 text-slate-200 transition"
-            >
-              + lag (_1)
-            </button>
-            <button
-              onClick={() => applyTransformation("sq")}
-              title="Квадраты переменных"
-              className="px-2 py-1 text-[11px] font-mono rounded bg-slate-800 hover:bg-indigo-600/30 hover:border-indigo-500/50 border border-slate-700 text-slate-200 transition"
-            >
-              + sq (X²)
-            </button>
-            <button
-              onClick={() => applyTransformation("pch")}
-              title="Темп прироста в %"
-              className="px-2 py-1 text-[11px] font-mono rounded bg-slate-800 hover:bg-indigo-600/30 hover:border-indigo-500/50 border border-slate-700 text-slate-200 transition"
-            >
-              + pch (%)
-            </button>
-          </div>
-
-          {/* Таблица переменных */}
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-800/60 text-xs">
-            {/* ID 0 = const */}
-            <div className="px-3.5 py-2.5 bg-slate-900/30 text-slate-500 flex items-center justify-between font-mono">
-              <div>
-                <span className="inline-block w-6 text-slate-600">0</span>
-                <span className="font-semibold text-slate-400">const</span>
-                <p className="text-[11px] font-sans text-slate-500 pl-6">
-                  Константа (единичный вектор)
-                </p>
-              </div>
-              <span className="text-[11px]">μ = 1.00</span>
+      {/* ОСНОВНОЙ РАБОЧИЙ ЭКРАН */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-0">
+        {/* ЛЕВАЯ ПАНЕЛЬ: СПИСОК ПОКАЗАТЕЛЕЙ И ПРЕОБРАЗОВАНИЯ */}
+        <aside className="lg:col-span-4 xl:col-span-3 border-r border-slate-800/80 bg-slate-900/40 flex flex-col">
+          <div className="p-4 border-b border-slate-800/80">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+                Шаг 1. Показатели ({varNames.length})
+              </span>
+              <span className="text-[11px] text-indigo-400 font-medium">
+                Выбрано: {selectedVars.length}
+              </span>
             </div>
+            <p className="text-[11px] text-slate-400">
+              Отметьте показатели для построения графиков или создания новых переменных:
+            </p>
 
+            {/* Понятные кнопки трансформации */}
+            <div className="mt-3 grid grid-cols-2 gap-1.5">
+              <button
+                onClick={() => applyTransformation("log")}
+                className="flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-slate-800/90 hover:bg-indigo-600/25 hover:border-indigo-500/50 border border-slate-700/80 text-slate-200 transition"
+              >
+                <PlusCircle className="w-3 h-3 text-indigo-400" />
+                Логарифм ln(X)
+              </button>
+              <button
+                onClick={() => applyTransformation("diff")}
+                className="flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-slate-800/90 hover:bg-indigo-600/25 hover:border-indigo-500/50 border border-slate-700/80 text-slate-200 transition"
+              >
+                <PlusCircle className="w-3 h-3 text-indigo-400" />
+                Разность ΔX
+              </button>
+              <button
+                onClick={() => applyTransformation("lag1")}
+                className="flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-slate-800/90 hover:bg-indigo-600/25 hover:border-indigo-500/50 border border-slate-700/80 text-slate-200 transition"
+              >
+                <PlusCircle className="w-3 h-3 text-indigo-400" />
+                Лаг X(t-1)
+              </button>
+              <button
+                onClick={() => applyTransformation("pch")}
+                className="flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-slate-800/90 hover:bg-indigo-600/25 hover:border-indigo-500/50 border border-slate-700/80 text-slate-200 transition"
+              >
+                <PlusCircle className="w-3 h-3 text-indigo-400" />
+                Прирост в %
+              </button>
+            </div>
+          </div>
+
+          {/* Список карточек переменных */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {varStats.map((v) => {
               const isSelected = selectedVars.includes(v.name);
               return (
                 <div
                   key={v.name}
                   onClick={() => toggleSelectVar(v.name)}
-                  className={`px-3.5 py-2.5 cursor-pointer transition flex items-center justify-between ${
+                  className={`p-3 rounded-xl cursor-pointer transition border ${
                     isSelected
-                      ? "bg-indigo-600/15 border-l-2 border-l-indigo-500"
-                      : "hover:bg-slate-800/50"
+                      ? "bg-indigo-600/15 border-indigo-500/60 shadow-sm"
+                      : "bg-slate-900/60 border-slate-800/80 hover:border-slate-700"
                   }`}
                 >
-                  <div className="min-w-0 pr-2">
-                    <div className="flex items-center gap-1.5 font-mono">
-                      <span className="w-5 text-slate-500">{v.id}</span>
-                      <span className="font-semibold text-slate-100 truncate">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {}}
+                        className="rounded border-slate-600 bg-slate-950 text-indigo-500 pointer-events-none"
+                      />
+                      <span className="font-semibold text-xs text-white truncate">
                         {v.name}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400 truncate pl-6">
-                      {v.desc}
-                    </p>
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-950 text-slate-300 border border-slate-800">
+                      Среднее: {v.mean.toFixed(2)}
+                    </span>
                   </div>
-                  <div className="text-right font-mono text-[11px] shrink-0">
-                    <div className="text-slate-300">μ: {v.mean.toFixed(2)}</div>
-                    <div className="text-slate-500">
-                      σ: {v.std.toFixed(2)} (N={v.n})
-                    </div>
+                  <p className="text-[11px] text-slate-400 mt-1 pl-6 truncate">
+                    {v.desc}
+                  </p>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1.5 pl-6 font-mono">
+                    <span>Разброс (σ): {v.std.toFixed(2)}</span>
+                    <span>Наблюдений: {v.n}</span>
                   </div>
                 </div>
               );
@@ -1039,15 +1079,31 @@ export default function NextGretlWorkspace() {
           </div>
         </aside>
 
-        {/* ПРАВАЯ ЧАСТЬ: ВКЛАДКИ АНАЛИЗА И ГРАФИКОВ */}
-        <main className="lg:col-span-8 xl:col-span-9 flex flex-col overflow-y-auto bg-slate-950">
-          {/* Переключатель рабочих вкладок */}
-          <div className="border-b border-slate-800 bg-slate-900/40 px-6 flex items-center gap-2 pt-2">
+        {/* ПРАВАЯ РАБОЧАЯ ЗОНА */}
+        <main className="lg:col-span-8 xl:col-span-9 flex flex-col bg-slate-950">
+          {/* Навигационные вкладки с понятными названиями */}
+          <div className="border-b border-slate-800/80 bg-slate-900/30 px-6 pt-3 flex flex-wrap items-center gap-2">
             {[
-              { id: "ols", label: "МНК-Модели (OLS & Диагностика)", icon: Layers },
-              { id: "markov", label: "Цепи Маркова (Матрица P и Прогноз)", icon: Activity },
-              { id: "timeseries", label: "Временные ряды (ADF & Корреляции)", icon: BarChart3 },
-              { id: "data", label: "Таблица наблюдений", icon: Database },
+              {
+                id: "ols",
+                label: "1. Регрессионная модель и выводы",
+                icon: Layers,
+              },
+              {
+                id: "markov",
+                label: "2. Прогноз по цепям Маркова",
+                icon: Activity,
+              },
+              {
+                id: "timeseries",
+                label: "3. Динамика и стационарность рядов",
+                icon: BarChart3,
+              },
+              {
+                id: "data",
+                label: "4. Исходная таблица данных",
+                icon: TableIcon,
+              },
             ].map((t) => {
               const Icon = t.icon;
               const active = activeTab === t.id;
@@ -1055,13 +1111,13 @@ export default function NextGretlWorkspace() {
                 <button
                   key={t.id}
                   onClick={() => setActiveTab(t.id as typeof activeTab)}
-                  className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-t-lg border-t border-x transition ${
+                  className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-t-xl border-t border-x transition ${
                     active
                       ? "bg-slate-950 text-indigo-400 border-slate-800"
-                      : "border-transparent text-slate-400 hover:text-slate-200"
+                      : "border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40"
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
+                  <Icon className="w-4 h-4" />
                   {t.label}
                 </button>
               );
@@ -1070,171 +1126,228 @@ export default function NextGretlWorkspace() {
 
           <div className="p-6 space-y-6 flex-1">
             {/* ============================================================== */}
-            {/* ВКЛАДКА 1: МНК-РЕГРЕССИЯ (OLS MODEL WINDOW КАК В GRETL)         */}
+            {/* ВКЛАДКА 1: РЕГРЕССИОННЫЙ АНАЛИЗ (МНК + АВТО-ВЫВОДЫ)             */}
             {/* ============================================================== */}
             {activeTab === "ols" && (
               <>
-                {/* Конструктор спецификации модели */}
-                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+                {/* Шаг 2: Интуитивный конструктор модели */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex flex-wrap items-center gap-4">
-                      <div>
-                        <label className="block text-[11px] uppercase tracking-wider text-slate-400 mb-1">
-                          Зависимая переменная (Y)
-                        </label>
-                        <select
-                          value={depVar}
-                          onChange={(e) => setDepVar(e.target.value)}
-                          className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono text-white"
-                        >
-                          {varNames.map((v) => (
-                            <option key={v} value={v}>
-                              {v}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                    <div>
+                      <h2 className="text-sm font-bold text-white">
+                        Шаг 2. Настройка уравнения регрессии
+                      </h2>
+                      <p className="text-xs text-slate-400">
+                        Укажите целевой показатель (Y), который хотите объяснить, и влияющие на него факторы (X)
+                      </p>
+                    </div>
 
-                      <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-4">
+                    <button
+                      onClick={handleRunOLS}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/25 transition cursor-pointer"
+                    >
+                      <Play className="w-4 h-4 fill-current" />
+                      Рассчитать модель
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pt-2 border-t border-slate-800/80">
+                    {/* Выбор Y */}
+                    <div className="md:col-span-4">
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Целевой показатель (Y):
+                      </label>
+                      <select
+                        value={depVar}
+                        onChange={(e) => setDepVar(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold text-white outline-none focus:border-indigo-500"
+                      >
+                        {varNames.map((v) => (
+                          <option key={v} value={v}>
+                            {v} — {descriptions[v] || ""}
+                          </option>
+                        ))}
+                      </select>
+
+                      <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer mt-3">
                         <input
                           type="checkbox"
                           checked={useHC3}
                           onChange={(e) => setUseHC3(e.target.checked)}
                           className="rounded border-slate-700 bg-slate-950 text-indigo-500"
                         />
-                        Робастные ст. ошибки Уайта (HC3)
+                        <span>Защита от неоднородности (ошибки Уайта HC3)</span>
                       </label>
                     </div>
 
-                    <button
-                      onClick={() => handleRunOLS()}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow transition"
-                    >
-                      <Play className="w-3.5 h-3.5" />
-                      Оценить модель МНК
-                    </button>
-                  </div>
-
-                  {/* Выбор регрессоров (X) чипсами */}
-                  <div>
-                    <span className="block text-[11px] uppercase tracking-wider text-slate-400 mb-1.5">
-                      Независимые переменные / Регрессоры (X):
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {varNames
-                        .filter((v) => v !== depVar)
-                        .map((v) => {
-                          const active = regressors.includes(v);
-                          return (
-                            <button
-                              key={v}
-                              onClick={() =>
-                                setRegressors((prev) =>
-                                  prev.includes(v)
-                                    ? prev.filter((x) => x !== v)
-                                    : [...prev, v]
-                                )
-                              }
-                              className={`px-2.5 py-1 rounded-md text-xs font-mono border transition ${
-                                active
-                                  ? "bg-indigo-600/25 border-indigo-500 text-indigo-200"
-                                  : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
-                              }`}
-                            >
-                              {v}
-                            </button>
-                          );
-                        })}
+                    {/* Выбор факторов X */}
+                    <div className="md:col-span-8">
+                      <span className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Объясняющие факторы (X) — нажмите, чтобы включить или выключить:
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {varNames
+                          .filter((v) => v !== depVar)
+                          .map((v) => {
+                            const active = regressors.includes(v);
+                            return (
+                              <button
+                                key={v}
+                                onClick={() =>
+                                  setRegressors((prev) =>
+                                    prev.includes(v)
+                                      ? prev.filter((x) => x !== v)
+                                      : [...prev, v]
+                                  )
+                                }
+                                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition cursor-pointer ${
+                                  active
+                                    ? "bg-indigo-600/25 border-indigo-500 text-indigo-200 shadow-sm"
+                                    : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
+                                }`}
+                              >
+                                {active ? "✓ " : "+ "}
+                                {v}
+                              </button>
+                            );
+                          })}
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Список открытых окон моделей (Модель 1, Модель 2...) */}
+                {/* Переключатель истории рассчитанных моделей */}
                 {models.length > 1 && (
                   <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                    <span className="text-xs text-slate-400 mr-1">История расчетов:</span>
                     {models.map((m) => (
                       <button
                         key={m.id}
                         onClick={() => setActiveModelId(m.id)}
-                        className={`px-3 py-1 rounded-lg text-xs font-mono border transition ${
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition ${
                           m.id === activeModel.id
                             ? "bg-indigo-600 text-white border-indigo-500"
                             : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200"
                         }`}
                       >
-                        Модель {m.id}: {m.depVar} ({m.useHC3 ? "HC3" : "OLS"})
+                        Модель №{m.id}: {m.depVar} (R² = {(m.metrics.r2 * 100).toFixed(1)}%)
                       </button>
                     ))}
                   </div>
                 )}
 
-                {/* ФИРМЕННАЯ ТАБЛИЦА ОТЧЕТА GRETL */}
+                {/* БЛОК УРАВНЕНИЯ И АВТОМАТИЧЕСКОЙ ИНТЕРПРЕТАЦИИ ДЛЯ ОТЧЕТА */}
                 {activeModel && (
-                  <div className="rounded-xl border border-slate-800 bg-slate-900/80 overflow-hidden">
-                    <div className="px-5 py-3.5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 bg-slate-900">
+                  <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/30 via-slate-900/80 to-slate-900 p-5 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-5 h-5 text-indigo-400" />
+                        <h3 className="text-sm font-bold text-white">
+                          Готовое уравнение и аналитическое резюме (Модель №{activeModel.id})
+                        </h3>
+                      </div>
+                      <button
+                        onClick={copyReportToClipboard}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-200 border border-indigo-500/40 transition cursor-pointer"
+                      >
+                        {copiedReport ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            Скопировано!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            Скопировать выводы для отчета
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Математическая запись полученного уравнения */}
+                    <div className="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 font-mono text-xs sm:text-sm text-indigo-200 overflow-x-auto">
+                      {formattedEquation}
+                    </div>
+
+                    {/* Список автоматических выводов на русском языке */}
+                    <ul className="space-y-2 text-xs text-slate-200 leading-relaxed">
+                      {autoConclusions.map((item, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="text-indigo-400 font-bold">•</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* ТАБЛИЦА КОЭФФИЦИЕНТОВ И КЛЮЧЕВЫХ ПОКАЗАТЕЛЕЙ КАЧЕСТВА */}
+                {activeModel && (
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+                    <div className="px-5 py-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <h2 className="text-sm font-bold text-white font-mono">
-                          Модель {activeModel.id}: МНК, использованы наблюдения 1–
-                          {activeModel.nObs} (T = {activeModel.nObs})
-                        </h2>
-                        <p className="text-xs text-slate-400 font-mono">
-                          Зависимая переменная: {activeModel.depVar}{" "}
-                          {activeModel.useHC3 && "• Робастные ошибки Уайта (HC3)"}
+                        <h3 className="text-sm font-bold text-white">
+                          Таблица оценок коэффициентов (МНК, N = {activeModel.nObs})
+                        </h3>
+                        <p className="text-xs text-slate-400">
+                          Чем меньше p-значение (p &lt; 0.05), тем надежнее доказано влияние фактора на «{activeModel.depVar}»
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => saveModelSeriesToDf("resid")}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+                          className="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
                         >
-                          <Save className="w-3.5 h-3.5 text-amber-400" />+ uhat
-                          {activeModel.id}
+                          + Сохранить остатки в список
                         </button>
                         <button
                           onClick={() => saveModelSeriesToDf("fitted")}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+                          className="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
                         >
-                          <Plus className="w-3.5 h-3.5 text-emerald-400" />+ yhat
-                          {activeModel.id}
+                          + Сохранить прогноз в список
                         </button>
                       </div>
                     </div>
 
-                    {/* Таблица коэффициентов */}
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse font-mono text-xs">
+                      <table className="w-full text-left border-collapse text-xs">
                         <thead>
                           <tr className="border-b border-slate-800 text-slate-400 bg-slate-950/50">
-                            <th className="py-2.5 px-4">Переменная</th>
-                            <th className="py-2.5 px-4 text-right">Коэффициент</th>
-                            <th className="py-2.5 px-4 text-right">Ст. ошибка</th>
-                            <th className="py-2.5 px-4 text-right">t-статистика</th>
-                            <th className="py-2.5 px-4 text-right">p-значение</th>
-                            <th className="py-2.5 px-4 text-center">Знач.</th>
+                            <th className="py-3 px-4">Фактор (Переменная)</th>
+                            <th className="py-3 px-4 text-right">Коэффициент (β)</th>
+                            <th className="py-3 px-4 text-right">Станд. ошибка</th>
+                            <th className="py-3 px-4 text-right">t-критерий</th>
+                            <th className="py-3 px-4 text-right">Вероятность ошибки (p-value)</th>
+                            <th className="py-3 px-4 text-center">Значимость</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800/60">
+                        <tbody className="divide-y divide-slate-800/60 font-mono">
                           {activeModel.coefficients.map((c) => (
-                            <tr key={c.name} className="hover:bg-slate-800/40">
-                              <td className="py-2 px-4 font-semibold text-indigo-300">
+                            <tr key={c.name} className="hover:bg-slate-800/30">
+                              <td className="py-2.5 px-4 font-sans font-semibold text-white">
                                 {c.name}
+                                {descriptions[c.name] && (
+                                  <span className="block text-[11px] font-normal text-slate-400">
+                                    {descriptions[c.name]}
+                                  </span>
+                                )}
                               </td>
-                              <td className="py-2 px-4 text-right text-slate-100">
+                              <td className="py-2.5 px-4 text-right font-bold text-indigo-300">
                                 {c.beta.toFixed(5)}
                               </td>
-                              <td className="py-2 px-4 text-right text-slate-300">
+                              <td className="py-2.5 px-4 text-right text-slate-300">
                                 {c.se.toFixed(5)}
                               </td>
-                              <td className="py-2 px-4 text-right text-slate-200">
+                              <td className="py-2.5 px-4 text-right text-slate-200">
                                 {c.tStat.toFixed(4)}
                               </td>
-                              <td className="py-2 px-4 text-right text-slate-300">
+                              <td className="py-2.5 px-4 text-right text-slate-300">
                                 {c.pValue < 0.0001
                                   ? c.pValue.toExponential(2)
                                   : c.pValue.toFixed(4)}
                               </td>
-                              <td className="py-2 px-4 text-center text-amber-400 font-bold">
-                                {c.sig}
+                              <td className={`py-2.5 px-4 text-center font-sans font-semibold ${c.sigColor}`}>
+                                {c.sigText} {c.sigStars !== "—" && `(${c.sigStars})`}
                               </td>
                             </tr>
                           ))}
@@ -1242,150 +1355,215 @@ export default function NextGretlWorkspace() {
                       </table>
                     </div>
 
-                    {/* Двухколоночный блок метрик gretl */}
-                    <div className="p-4 bg-slate-950/60 border-t border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
-                      <div className="p-2.5 rounded bg-slate-900 border border-slate-800/80">
+                    {/* Карточки сводных метрик с пояснениями */}
+                    <div className="p-4 bg-slate-950/60 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                      <div className="p-3 rounded-xl bg-slate-900 border border-slate-800/80">
                         <span className="text-slate-400 block text-[11px]">
-                          R-квадрат / Испр. R²
+                          Точность подгонки (R² / Скорр. R²)
                         </span>
-                        <span className="text-emerald-400 font-bold">
-                          {activeModel.metrics.r2.toFixed(4)}
-                        </span>{" "}
-                        / {activeModel.metrics.adjR2.toFixed(4)}
-                      </div>
-                      <div className="p-2.5 rounded bg-slate-900 border border-slate-800/80">
-                        <span className="text-slate-400 block text-[11px]">
-                          F({activeModel.dfModel}, {activeModel.dfResid}) [p-val]
-                        </span>
-                        <span className="text-white font-bold">
-                          {activeModel.metrics.fStat.toFixed(2)}
-                        </span>{" "}
-                        [{activeModel.metrics.fPval.toExponential(2)}]
-                      </div>
-                      <div className="p-2.5 rounded bg-slate-900 border border-slate-800/80">
-                        <span className="text-slate-400 block text-[11px]">
-                          Критерии AIC / BIC
-                        </span>
-                        <span className="text-slate-200">
-                          {activeModel.metrics.aic.toFixed(2)} /{" "}
-                          {activeModel.metrics.bic.toFixed(2)}
+                        <div className="text-base font-bold text-emerald-400 font-mono mt-0.5">
+                          {(activeModel.metrics.r2 * 100).toFixed(2)}%{" "}
+                          <span className="text-xs font-normal text-slate-400">
+                            ({(activeModel.metrics.adjR2 * 100).toFixed(2)}%)
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-500">
+                          Доля объясненной дисперсии Y
                         </span>
                       </div>
-                      <div className="p-2.5 rounded bg-slate-900 border border-slate-800/80">
+
+                      <div className="p-3 rounded-xl bg-slate-900 border border-slate-800/80">
                         <span className="text-slate-400 block text-[11px]">
-                          Дарбина — Уотсона (DW)
+                          Критерий Фишера F({activeModel.dfModel}, {activeModel.dfResid})
                         </span>
-                        <span className="text-indigo-300 font-bold">
-                          {activeModel.metrics.dw.toFixed(4)}
-                        </span>{" "}
-                        (SSR: {activeModel.metrics.ssr.toFixed(1)})
+                        <div className="text-base font-bold text-white font-mono mt-0.5">
+                          {activeModel.metrics.fStat.toFixed(2)}{" "}
+                          <span className="text-xs font-normal text-emerald-400">
+                            (p = {activeModel.metrics.fPval.toExponential(2)})
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-500">
+                          Надежность уравнения в целом
+                        </span>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900 border border-slate-800/80">
+                        <span className="text-slate-400 block text-[11px]">
+                          Критерий Дарбина — Уотсона (DW)
+                        </span>
+                        <div className="text-base font-bold text-indigo-300 font-mono mt-0.5">
+                          {activeModel.metrics.dw.toFixed(3)}
+                        </div>
+                        <span className="text-[11px] text-slate-500">
+                          {activeModel.metrics.dw >= 1.5 && activeModel.metrics.dw <= 2.5
+                            ? "Норма (около 2.0 — автокорреляции нет)"
+                            : "Отклонение от 2.0 (риск автокорреляции)"}
+                        </span>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900 border border-slate-800/80">
+                        <span className="text-slate-400 block text-[11px]">
+                          Информационные критерии AIC / BIC
+                        </span>
+                        <div className="text-base font-bold text-slate-200 font-mono mt-0.5">
+                          {activeModel.metrics.aic.toFixed(1)} /{" "}
+                          {activeModel.metrics.bic.toFixed(1)}
+                        </div>
+                        <span className="text-[11px] text-slate-500">
+                          Чем меньше значение, тем лучше модель
+                        </span>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* БЛОК ДИАГНОСТИЧЕСКИХ ТЕСТОВ ПРЕДПОСЫЛОК ГАУССА — МАРКОВА */}
+                {/* НАГЛЯДНАЯ ПРОВЕРКА УСЛОВИЙ ГАУССА — МАРКОВА */}
                 {activeModel && (
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    {/* Бреуш — Паган */}
-                    <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-900/50">
-                      <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                        <span>Бреуш — Паган (LM)</span>
-                        {activeModel.diagnostics.bpPval > 0.05 ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        ) : (
-                          <AlertTriangle className="w-4 h-4 text-amber-400" />
-                        )}
-                      </div>
-                      <div className="font-mono text-xs text-slate-300">
-                        LM = {activeModel.diagnostics.bpLM.toFixed(3)} (p ={" "}
-                        {activeModel.diagnostics.bpPval.toFixed(3)})
-                      </div>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        {activeModel.diagnostics.bpPval > 0.05
-                          ? "Гомоскедастичность (норма)"
-                          : "Гетероскедастичность (включите HC3)"}
-                      </p>
-                    </div>
-
-                    {/* Рамсей RESET */}
-                    <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-900/50">
-                      <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                        <span>Тест Рамсея (RESET)</span>
-                        {activeModel.diagnostics.resetPval > 0.05 ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        ) : (
-                          <AlertTriangle className="w-4 h-4 text-amber-400" />
-                        )}
-                      </div>
-                      <div className="font-mono text-xs text-slate-300">
-                        F = {activeModel.diagnostics.resetF.toFixed(3)} (p ={" "}
-                        {activeModel.diagnostics.resetPval.toFixed(3)})
-                      </div>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        {activeModel.diagnostics.resetPval > 0.05
-                          ? "Линейная спецификация адекватна"
-                          : "Пропущены нелинейности (X²)"}
-                      </p>
-                    </div>
-
-                    {/* Жарк — Бера */}
-                    <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-900/50">
-                      <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                        <span>Жарк — Бера (JB)</span>
-                        {activeModel.diagnostics.jbPval > 0.05 ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        ) : (
-                          <AlertTriangle className="w-4 h-4 text-amber-400" />
-                        )}
-                      </div>
-                      <div className="font-mono text-xs text-slate-300">
-                        JB = {activeModel.diagnostics.jbStat.toFixed(3)} (p ={" "}
-                        {activeModel.diagnostics.jbPval.toFixed(3)})
-                      </div>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        {activeModel.diagnostics.jbPval > 0.05
-                          ? "Остатки распределены нормально"
-                          : "Отклонение от нормальности"}
-                      </p>
-                    </div>
-
-                    {/* Мультиколлинеарность VIF */}
-                    <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-900/50">
-                      <div className="text-xs font-semibold mb-1">
-                        Факторы инфляции (VIF)
-                      </div>
-                      <div className="space-y-0.5 font-mono text-[11px]">
-                        {activeModel.diagnostics.vif.map((v) => (
-                          <div key={v.name} className="flex justify-between">
-                            <span className="text-slate-400 truncate pr-2">
-                              {v.name}:
-                            </span>
-                            <span
-                              className={
-                                v.value < 5
-                                  ? "text-emerald-400"
-                                  : v.value < 10
-                                  ? "text-amber-400"
-                                  : "text-rose-400 font-bold"
-                              }
-                            >
-                              {v.value.toFixed(2)}
-                            </span>
+                  <div className="space-y-2.5">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Проверка корректности модели (Тесты Гаусса — Маркова)
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5">
+                      {/* 1. Гетероскедастичность */}
+                      <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/50 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between text-xs font-bold text-white mb-1">
+                            <span>1. Однородность ошибок</span>
+                            {activeModel.diagnostics.bpPval > 0.05 ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                В норме
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                Внимание
+                              </span>
+                            )}
                           </div>
-                        ))}
+                          <p className="text-[11px] text-slate-400">
+                            Тест Бреуша — Пагана проверяет постоянство разброса ошибок.
+                          </p>
+                        </div>
+                        <div className="mt-3 pt-2 border-t border-slate-800/80">
+                          <div className="font-mono text-xs text-slate-200">
+                            LM = {activeModel.diagnostics.bpLM.toFixed(2)} (p ={" "}
+                            {activeModel.diagnostics.bpPval.toFixed(3)})
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            {activeModel.diagnostics.bpPval > 0.05
+                              ? "✓ Гетероскедастичность отсутствует (p > 0.05)"
+                              : "⚠ Есть гетероскедастичность (включите галочку HC3 выше)"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* 2. Спецификация Рамсея */}
+                      <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/50 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between text-xs font-bold text-white mb-1">
+                            <span>2. Правильность формы</span>
+                            {activeModel.diagnostics.resetPval > 0.05 ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                В норме
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                Внимание
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-400">
+                            Тест Рамсея (RESET) проверяет, не пропущены ли квадраты и нелинейные связи.
+                          </p>
+                        </div>
+                        <div className="mt-3 pt-2 border-t border-slate-800/80">
+                          <div className="font-mono text-xs text-slate-200">
+                            F = {activeModel.diagnostics.resetF.toFixed(2)} (p ={" "}
+                            {activeModel.diagnostics.resetPval.toFixed(3)})
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            {activeModel.diagnostics.resetPval > 0.05
+                              ? "✓ Линейная формула выбрана верно (p > 0.05)"
+                              : "⚠ Рекомендуется добавить логарифмы или квадраты"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* 3. Нормальность остатков */}
+                      <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/50 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between text-xs font-bold text-white mb-1">
+                            <span>3. Нормальность остатков</span>
+                            {activeModel.diagnostics.jbPval > 0.05 ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                В норме
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                Внимание
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-400">
+                            Тест Жарка — Бера проверяет колоколообразность распределения ошибок.
+                          </p>
+                        </div>
+                        <div className="mt-3 pt-2 border-t border-slate-800/80">
+                          <div className="font-mono text-xs text-slate-200">
+                            JB = {activeModel.diagnostics.jbStat.toFixed(2)} (p ={" "}
+                            {activeModel.diagnostics.jbPval.toFixed(3)})
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            {activeModel.diagnostics.jbPval > 0.05
+                              ? "✓ Остатки распределены нормально (p > 0.05)"
+                              : "⚠ Есть выбросы в остатках"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* 4. Мультиколлинеарность VIF */}
+                      <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/50 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between text-xs font-bold text-white mb-1">
+                            <span>4. Независимость X (VIF)</span>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          </div>
+                          <p className="text-[11px] text-slate-400">
+                            Если VIF &lt; 10, факторы не дублируют друг друга (мультиколлинеарности нет):
+                          </p>
+                        </div>
+                        <div className="mt-2 pt-2 border-t border-slate-800/80 space-y-1 font-mono text-xs">
+                          {activeModel.diagnostics.vif.map((v) => (
+                            <div key={v.name} className="flex justify-between">
+                              <span className="text-slate-300 truncate pr-2">{v.name}:</span>
+                              <span
+                                className={
+                                  v.value < 5
+                                    ? "text-emerald-400 font-bold"
+                                    : v.value < 10
+                                    ? "text-amber-400 font-bold"
+                                    : "text-rose-400 font-bold"
+                                }
+                              >
+                                {v.value.toFixed(2)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* ИНТЕРАКТИВНЫЕ ГРАФИКИ RECHARTS: Y vs Y_HAT И ОСТАТКИ */}
+                {/* ГРАФИКИ МОДЕЛИ */}
                 {activeModel && (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-                      <h3 className="text-xs font-semibold text-slate-300 mb-3">
-                        Фактические ({activeModel.depVar}) и расчетные значения (Y_hat)
+                    <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
+                      <h3 className="text-xs font-bold text-white mb-1">
+                        Насколько точно модель повторяет реальные данные ({activeModel.depVar})
                       </h3>
+                      <p className="text-[11px] text-slate-400 mb-4">
+                        Голубая линия — фактические значения, пунктирная — расчет по уравнению регрессии
+                      </p>
                       <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={activeModel.seriesData}>
@@ -1396,6 +1574,7 @@ export default function NextGretlWorkspace() {
                               contentStyle={{
                                 backgroundColor: "#0f172a",
                                 borderColor: "#334155",
+                                borderRadius: "10px",
                                 fontSize: "12px",
                               }}
                             />
@@ -1405,16 +1584,16 @@ export default function NextGretlWorkspace() {
                               dataKey="actual"
                               name={`Факт (${activeModel.depVar})`}
                               stroke="#38bdf8"
-                              strokeWidth={2}
+                              strokeWidth={2.2}
                               dot={{ r: 2 }}
                             />
                             <Line
                               type="monotone"
                               dataKey="fitted"
-                              name="Модель МНК (Y_hat)"
+                              name="Расчет по модели"
                               stroke="#f43f5e"
-                              strokeWidth={2}
-                              strokeDasharray="4 4"
+                              strokeWidth={2.2}
+                              strokeDasharray="5 5"
                               dot={false}
                             />
                           </LineChart>
@@ -1422,10 +1601,13 @@ export default function NextGretlWorkspace() {
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-                      <h3 className="text-xs font-semibold text-slate-300 mb-3">
-                        Диаграмма остатков регрессии (uhat vs Y_hat)
+                    <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
+                      <h3 className="text-xs font-bold text-white mb-1">
+                        Диаграмма разброса ошибок (остатков) модели
                       </h3>
+                      <p className="text-[11px] text-slate-400 mb-4">
+                        Равномерное облако точек вокруг красной нулевой линии подтверждает высокое качество модели
+                      </p>
                       <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
                           <ScatterChart>
@@ -1433,14 +1615,14 @@ export default function NextGretlWorkspace() {
                             <XAxis
                               type="number"
                               dataKey="fitted"
-                              name="Y_hat"
+                              name="Прогноз"
                               stroke="#64748b"
                               fontSize={11}
                             />
                             <YAxis
                               type="number"
                               dataKey="resid"
-                              name="Остаток e"
+                              name="Ошибка"
                               stroke="#64748b"
                               fontSize={11}
                             />
@@ -1449,12 +1631,13 @@ export default function NextGretlWorkspace() {
                               contentStyle={{
                                 backgroundColor: "#0f172a",
                                 borderColor: "#334155",
+                                borderRadius: "10px",
                                 fontSize: "12px",
                               }}
                             />
                             <ReferenceLine y={0} stroke="#f43f5e" strokeDasharray="4 4" />
                             <Scatter
-                              name="Наблюдения (e_i)"
+                              name="Остатки наблюдений"
                               data={activeModel.seriesData}
                               fill="#f59e0b"
                             />
@@ -1468,19 +1651,25 @@ export default function NextGretlWorkspace() {
             )}
 
             {/* ============================================================== */}
-            {/* ВКЛАДКА 2: ЦЕПИ МАРКОВА (МАТРИЦА ПЕРЕХОДОВ И ПРОГНОЗ)          */}
+            {/* ВКЛАДКА 2: ПРОГНОЗИРОВАНИЕ ЦЕПЯМИ МАРКОВА                      */}
             {/* ============================================================== */}
             {activeTab === "markov" && (
               <div className="space-y-6">
-                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 flex flex-wrap items-center justify-between gap-4">
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-sm font-bold text-white">
+                      Стохастическое прогнозирование по цепям Маркова
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                      Ряд автоматически делится на 3 экономические фазы (Спад, Стагнация, Рост) и рассчитываются вероятности переходов между ними
+                    </p>
+                  </div>
                   <div className="flex items-center gap-3">
-                    <label className="text-xs text-slate-400">
-                      Анализируемый показатель:
-                    </label>
+                    <span className="text-xs font-semibold text-slate-300">Показатель:</span>
                     <select
                       value={markovVar}
                       onChange={(e) => setMarkovVar(e.target.value)}
-                      className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono text-white"
+                      className="bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold text-white"
                     >
                       {varNames.map((v) => (
                         <option key={v} value={v}>
@@ -1489,54 +1678,53 @@ export default function NextGretlWorkspace() {
                       ))}
                     </select>
                   </div>
-                  <div className="text-xs font-mono text-slate-300">
-                    Текущее состояние (t=0):{" "}
-                    <span className="text-indigo-400 font-bold">
-                      {markovResult.currentState}
-                    </span>
-                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Матрица переходных вероятностей P_ij */}
-                  <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
-                    <h3 className="text-sm font-bold text-white">
-                      Матрица переходных вероятностей (P_ij) и частоты (n_ij)
-                    </h3>
-                    <table className="w-full border-collapse font-mono text-xs">
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-white">
+                        Матрица переходных вероятностей (P)
+                      </h3>
+                      <span className="text-xs text-indigo-300 font-medium">
+                        Сейчас система в фазе: {markovResult.currentState}
+                      </span>
+                    </div>
+
+                    <table className="w-full border-collapse text-xs">
                       <thead>
                         <tr className="border-b border-slate-800 text-slate-400">
-                          <th className="py-2 text-left">Из (t) \ В (t+1)</th>
-                          {markovResult.labels.map((l) => (
+                          <th className="py-2 text-left">Из фазы (t) \ В фазу (t+1)</th>
+                          {markovResult.shortLabels.map((l) => (
                             <th key={l} className="py-2 text-center">
                               {l}
                             </th>
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-800">
+                      <tbody className="divide-y divide-slate-800 font-mono">
                         {markovResult.P.map((row, i) => (
                           <tr key={i}>
-                            <td className="py-3 font-semibold text-indigo-300">
-                              {markovResult.labels[i]}
-                              <span className="block text-[10px] text-slate-500">
+                            <td className="py-3 font-sans font-semibold text-indigo-300">
+                              {markovResult.shortLabels[i]}
+                              <span className="block text-[11px] font-normal text-slate-400">
                                 {markovResult.bounds[i]}
                               </span>
                             </td>
                             {row.map((prob, j) => (
                               <td key={j} className="py-3 text-center">
                                 <div
-                                  className="inline-block px-2.5 py-1 rounded font-bold"
+                                  className="inline-block px-3 py-1 rounded-lg font-bold text-white"
                                   style={{
                                     backgroundColor: `rgba(99, 102, 241, ${
-                                      0.12 + prob * 0.65
+                                      0.15 + prob * 0.65
                                     })`,
                                   }}
                                 >
-                                  {prob.toFixed(4)}
+                                  {(prob * 100).toFixed(1)}%
                                 </div>
-                                <span className="block text-[10px] text-slate-500 mt-0.5">
-                                  n = {markovResult.counts[i][j]}
+                                <span className="block text-[10px] text-slate-400 mt-1">
+                                  ({prob.toFixed(4)} • переходов: {markovResult.counts[i][j]})
                                 </span>
                               </td>
                             ))}
@@ -1545,19 +1733,18 @@ export default function NextGretlWorkspace() {
                       </tbody>
                     </table>
 
-                    {/* Стационарное (эргодическое) распределение pi */}
                     <div className="pt-3 border-t border-slate-800">
-                      <span className="text-xs text-slate-400 block mb-2">
-                        Предельное (эргодическое) распределение вероятностей (π · P = π):
+                      <span className="text-xs font-semibold text-slate-300 block mb-2">
+                        Долгосрочное равновесие (финальные вероятности π · P = π):
                       </span>
-                      <div className="grid grid-cols-3 gap-2 font-mono text-xs">
-                        {markovResult.labels.map((l, idx) => (
+                      <div className="grid grid-cols-3 gap-2.5 font-mono text-xs">
+                        {markovResult.shortLabels.map((l, idx) => (
                           <div
                             key={l}
-                            className="p-2.5 rounded bg-slate-950 border border-slate-800 text-center"
+                            className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-center"
                           >
-                            <div className="text-slate-400 text-[11px]">{l}</div>
-                            <div className="text-emerald-400 font-bold text-sm mt-0.5">
+                            <div className="text-slate-400 font-sans text-[11px]">{l}</div>
+                            <div className="text-emerald-400 font-bold text-base mt-0.5">
                               {(markovResult.stationary[idx] * 100).toFixed(2)}%
                             </div>
                           </div>
@@ -1566,13 +1753,12 @@ export default function NextGretlWorkspace() {
                     </div>
                   </div>
 
-                  {/* График прогноза распределения вероятностей S(t) = S(0) * P^t */}
-                  <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 flex flex-col">
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 flex flex-col">
                     <h3 className="text-sm font-bold text-white mb-1">
-                      Динамика прогноза состояний по шагам (S_t = S_0 · P^t)
+                      Прогноз вероятностей по шагам на 6 периодов вперед
                     </h3>
                     <p className="text-xs text-slate-400 mb-4">
-                      Вероятности нахождения показателя в каждой фазе (%) на 6 периодов вперед
+                      Показывает, с какой вероятностью показатель «{markovVar}» окажется в фазе спада, стагнации или роста
                     </p>
                     <div className="flex-1 min-h-[260px]">
                       <ResponsiveContainer width="100%" height="100%">
@@ -1584,18 +1770,29 @@ export default function NextGretlWorkspace() {
                             contentStyle={{
                               backgroundColor: "#0f172a",
                               borderColor: "#334155",
+                              borderRadius: "10px",
                               fontSize: "12px",
                             }}
                           />
                           <Legend wrapperStyle={{ fontSize: "12px" }} />
-                          <Bar dataKey="S1" name="S1 (Спад)" fill="#f43f5e" radius={[4, 4, 0, 0]} />
+                          <Bar
+                            dataKey="S1"
+                            name="S1 (Спад)"
+                            fill="#f43f5e"
+                            radius={[6, 6, 0, 0]}
+                          />
                           <Bar
                             dataKey="S2"
                             name="S2 (Стагнация)"
                             fill="#eab308"
-                            radius={[4, 4, 0, 0]}
+                            radius={[6, 6, 0, 0]}
                           />
-                          <Bar dataKey="S3" name="S3 (Рост)" fill="#10b981" radius={[4, 4, 0, 0]} />
+                          <Bar
+                            dataKey="S3"
+                            name="S3 (Рост)"
+                            fill="#10b981"
+                            radius={[6, 6, 0, 0]}
+                          />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -1605,25 +1802,24 @@ export default function NextGretlWorkspace() {
             )}
 
             {/* ============================================================== */}
-            {/* ВКЛАДКА 3: ВРЕМЕННЫЕ РЯДЫ (ADF-ТЕСТ И МАТРИЦА КОРРЕЛЯЦИЙ)       */}
+            {/* ВКЛАДКА 3: ВРЕМЕННЫЕ РЯДЫ И ТЕСТ СТАЦИОНАРНОСТИ ДИКИ — ФУЛЛЕРА  */}
             {/* ============================================================== */}
             {activeTab === "timeseries" && (
               <div className="space-y-6">
-                {/* Карточка теста Дики — Фуллера (ADF) */}
-                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div>
                       <h3 className="text-sm font-bold text-white">
-                        Расширенный тест Дики — Фуллера (ADF) на единичный корень
+                        Проверка стационарности временного ряда (Тест Дики — Фуллера / ADF)
                       </h3>
                       <p className="text-xs text-slate-400">
-                        Нулевая гипотеза H0: ряд нестационарен I(1) (содержит единичный корень)
+                        Позволяет узнать, есть ли в ряде нестационарный тренд, который может вызвать ложную регрессию
                       </p>
                     </div>
                     <select
                       value={tsVar}
                       onChange={(e) => setTsVar(e.target.value)}
-                      className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono text-white"
+                      className="bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs font-semibold text-white"
                     >
                       {varNames.map((v) => (
                         <option key={v} value={v}>
@@ -1633,60 +1829,78 @@ export default function NextGretlWorkspace() {
                     </select>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-mono text-xs">
-                    <div className="p-4 rounded-lg bg-slate-950 border border-slate-800">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div className="p-4 rounded-xl bg-slate-950 border border-slate-800">
                       <div className="text-slate-400 mb-1">
-                        1. Спецификация с константой (τ_c):
+                        Вариант 1. Модель с константой (без тренда):
                       </div>
-                      <div className="text-base font-bold text-white">
-                        τ = {adfResult.constModel.tau.toFixed(4)}{" "}
+                      <div className="text-base font-bold text-white font-mono">
+                        t-статистика = {adfResult.constModel.tau.toFixed(4)}{" "}
                         <span className="text-xs font-normal text-slate-400">
-                          (5% крит.: {adfResult.constModel.crit5})
+                          (порог 5%: {adfResult.constModel.crit5})
                         </span>
                       </div>
                       <div
-                        className={`mt-2 font-sans font-semibold ${
+                        className={`mt-2 font-semibold flex items-center gap-1.5 ${
                           adfResult.constModel.stationary
                             ? "text-emerald-400"
                             : "text-amber-400"
                         }`}
                       >
-                        {adfResult.constModel.stationary
-                          ? "✓ H0 отвергается: ряд стационарен в уровнях I(0)"
-                          : "⚠ Ряд нестационарен (рекомендуется взять разность d_)"}
+                        {adfResult.constModel.stationary ? (
+                          <>
+                            <CheckCircle2 className="w-4 h-4" />
+                            Ряд стационарен — можно сразу использовать в регрессии
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="w-4 h-4" />
+                            Ряд нестационарен — нажмите «Разность ΔX» в левой панели
+                          </>
+                        )}
                       </div>
                     </div>
 
-                    <div className="p-4 rounded-lg bg-slate-950 border border-slate-800">
+                    <div className="p-4 rounded-xl bg-slate-950 border border-slate-800">
                       <div className="text-slate-400 mb-1">
-                        2. Спецификация с константой и трендом (τ_ct):
+                        Вариант 2. Модель с константой и линейным трендом:
                       </div>
-                      <div className="text-base font-bold text-white">
-                        τ = {adfResult.trendModel.tau.toFixed(4)}{" "}
+                      <div className="text-base font-bold text-white font-mono">
+                        t-статистика = {adfResult.trendModel.tau.toFixed(4)}{" "}
                         <span className="text-xs font-normal text-slate-400">
-                          (5% крит.: {adfResult.trendModel.crit5})
+                          (порог 5%: {adfResult.trendModel.crit5})
                         </span>
                       </div>
                       <div
-                        className={`mt-2 font-sans font-semibold ${
+                        className={`mt-2 font-semibold flex items-center gap-1.5 ${
                           adfResult.trendModel.stationary
                             ? "text-emerald-400"
                             : "text-amber-400"
                         }`}
                       >
-                        {adfResult.trendModel.stationary
-                          ? "✓ H0 отвергается: ряд стационарен вокруг тренда"
-                          : "⚠ Ряд нестационарен"}
+                        {adfResult.trendModel.stationary ? (
+                          <>
+                            <CheckCircle2 className="w-4 h-4" />
+                            Ряд стационарен относительно линейного тренда
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="w-4 h-4" />
+                            Присутствует стохастический тренд (требуется взятие разностей)
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* График выбранных в левом списке переменных */}
-                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
-                  <h3 className="text-xs font-semibold text-slate-300 mb-3">
-                    Динамика выбранных в реестре переменных ({selectedVars.join(", ")})
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+                  <h3 className="text-sm font-bold text-white mb-1">
+                    График динамики отмеченных слева показателей ({selectedVars.join(", ")})
                   </h3>
+                  <p className="text-xs text-slate-400 mb-4">
+                    Отмечайте галочками любые показатели в левой колонке, чтобы сравнить их поведение на одном графике
+                  </p>
                   <div className="h-72">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={multiSeriesChartData}>
@@ -1697,6 +1911,7 @@ export default function NextGretlWorkspace() {
                           contentStyle={{
                             backgroundColor: "#0f172a",
                             borderColor: "#334155",
+                            borderRadius: "10px",
                             fontSize: "12px",
                           }}
                         />
@@ -1716,7 +1931,7 @@ export default function NextGretlWorkspace() {
                                 type="monotone"
                                 dataKey={v}
                                 stroke={palette[i % palette.length]}
-                                strokeWidth={2}
+                                strokeWidth={2.2}
                                 dot={false}
                               />
                             );
@@ -1733,14 +1948,22 @@ export default function NextGretlWorkspace() {
             {/* ВКЛАДКА 4: ТАБЛИЦА НАБЛЮДЕНИЙ                                  */}
             {/* ============================================================== */}
             {activeTab === "data" && (
-              <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
-                <div className="overflow-x-auto max-h-[500px]">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-white">
+                    Полная таблица данных ({df[varNames[0]].length} наблюдений)
+                  </h3>
+                  <span className="text-xs text-slate-400">
+                    Все созданные логарифмы, разности и прогнозы автоматически добавляются в крайние правые столбцы
+                  </span>
+                </div>
+                <div className="overflow-x-auto max-h-[520px]">
                   <table className="w-full text-left border-collapse font-mono text-xs">
-                    <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-400">
+                    <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-300">
                       <tr>
-                        <th className="py-2.5 px-3">t</th>
+                        <th className="py-3 px-4">Период (t)</th>
                         {varNames.map((v) => (
-                          <th key={v} className="py-2.5 px-3 text-right">
+                          <th key={v} className="py-3 px-4 text-right">
                             {v}
                           </th>
                         ))}
@@ -1749,12 +1972,12 @@ export default function NextGretlWorkspace() {
                     <tbody className="divide-y divide-slate-800/60">
                       {Array.from({ length: df[varNames[0]].length }, (_, rowIdx) => (
                         <tr key={rowIdx} className="hover:bg-slate-800/40">
-                          <td className="py-1.5 px-3 text-slate-500">{rowIdx + 1}</td>
+                          <td className="py-2 px-4 text-slate-500">{rowIdx + 1}</td>
                           {varNames.map((v) => (
-                            <td key={v} className="py-1.5 px-3 text-right text-slate-200">
+                            <td key={v} className="py-2 px-4 text-right text-slate-200">
                               {df[v][rowIdx] !== null && df[v][rowIdx] !== undefined
                                 ? Number(df[v][rowIdx]).toFixed(4)
-                                : "NA"}
+                                : "—"}
                             </td>
                           ))}
                         </tr>
@@ -1767,29 +1990,6 @@ export default function NextGretlWorkspace() {
           </div>
         </main>
       </div>
-
-      {/* НИЖНЯЯ КОНСОЛЬ HANSL И СТРОКА СОСТОЯНИЯ */}
-      <footer className="border-t border-slate-800 bg-slate-900 px-6 py-2.5 flex flex-col sm:flex-row items-center gap-3">
-        <form onSubmit={handleHanslCommand} className="flex-1 flex items-center gap-2 w-full">
-          <Terminal className="w-4 h-4 text-indigo-400 shrink-0" />
-          <input
-            type="text"
-            value={cmdInput}
-            onChange={(e) => setCmdInput(e.target.value)}
-            placeholder="Консоль hansl: ols GDP_Growth Investment KeyRate | logs Investment | diff KeyRate | markov GDP_Growth"
-            className="flex-1 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-100 outline-none"
-          />
-          <button
-            type="submit"
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition"
-          >
-            Выполнить
-          </button>
-        </form>
-        <div className="text-xs text-slate-400 font-mono truncate max-w-md">
-          {statusMsg}
-        </div>
-      </footer>
     </div>
   );
 }
