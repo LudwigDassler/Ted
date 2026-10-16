@@ -19,26 +19,16 @@ import {
 import {
   Upload,
   Download,
-  Play,
   Copy,
   Check,
   Plus,
   Trash2,
-  FileCode,
-  Table as TableIcon,
-  Sliders,
-  Activity,
-  BarChart2,
-  Calculator,
-  Search,
-  Database,
-  BookOpen,
-  Layers,
-  Sigma,
+  Sun,
+  Moon,
 } from "lucide-react";
 
 // ============================================================================
-// 1. ВЫСШАЯ МАТЕМАТИКА И ЧИСЛЕННЫЕ МЕТОДЫ (БЕЗ ВНЕШНИХ ЗАВИСИМОСТЕЙ)
+// 1. МАТЕМАТИЧЕСКОЕ ЯДРО (ТОЧНЫЕ РАСЧЕТЫ МНК, СПЕЦИФИКАЦИЙ, ADF И МАРКОВА)
 // ============================================================================
 
 function logGamma(z: number): number {
@@ -128,7 +118,6 @@ function fTestPValue(fStat: number, df1: number, df2: number): number {
 
 function fCritical95(df1: number, df2: number): number {
   if (df1 <= 0 || df2 <= 0) return 3.84;
-  // Аппроксимация Паульсона — Уилсона для критического значения F_{0.05}(df1, df2)
   const z = 1.64485;
   const a = 2 / (9 * df1);
   const b = 2 / (9 * df2);
@@ -149,7 +138,6 @@ function chi2PValue(x: number, k: number): number {
   return z > 0 ? prob : 1 - prob;
 }
 
-/** Обратная функция стандартного нормального распределения \Phi^{-1}(p) (алгоритм Аклама) для Q-Q Plot */
 function normInv(p: number): number {
   const prob = Math.min(Math.max(p, 1e-6), 1 - 1e-6);
   const a = [
@@ -268,10 +256,6 @@ function pearsonCorr(x: (number | null)[], y: (number | null)[]): number {
   }
   return dx > 0 && dy > 0 ? num / Math.sqrt(dx * dy) : 0;
 }
-
-// ============================================================================
-// 2. СТРУКТУРЫ РЕЗУЛЬТАТОВ МНК, МАТРИЦ, СПЕЦИФИКАЦИЙ И МАРКОВА
-// ============================================================================
 
 interface OLSResult {
   id: number;
@@ -403,7 +387,6 @@ function estimateOLS(
   const seReg = Math.sqrt(s2);
   const ySd = Math.sqrt(tss / (T - 1));
 
-  // Рычаги проекционной матрицы h_ii и расстояние Кука D_i
   const leverages: number[] = [];
   const cooksDistances: number[] = [];
   for (let i = 0; i < T; i++) {
@@ -575,7 +558,6 @@ function estimateOLS(
     .sort((a, b) => b.cooksD - a.cooksD)
     .slice(0, 5);
 
-  // Данные для квантиль-квантильного графика нормальности (Normal Q-Q Plot)
   const stdResiduals = resid
     .map((e, idx) => ({ z: e / Math.max(seReg, 1e-9), t: validIndices[idx] + 1 }))
     .sort((a, b) => a.z - b.z);
@@ -630,7 +612,6 @@ function estimateOLS(
   };
 }
 
-/** Автоматический компаратор 4 функциональных спецификаций (Wolfram FindFormula) */
 interface SpecComparisonItem {
   formName: string;
   formulaStr: string;
@@ -639,7 +620,6 @@ interface SpecComparisonItem {
   aicComparable: number;
   fStat: number;
   resetPval: number;
-  valid: boolean;
   note: string;
 }
 
@@ -655,7 +635,6 @@ function compareFunctionalForms(
     df[col].filter((v): v is number => v !== null && !isNaN(v)).every((v) => v > 0)
   );
 
-  // 1. Линейная: Y = b0 + sum b_j X_j
   try {
     const mLin = estimateOLS(df, depVar, indepVars, true, false, 0);
     results.push({
@@ -666,14 +645,10 @@ function compareFunctionalForms(
       aicComparable: mLin.metrics.aic,
       fStat: mLin.metrics.fStat,
       resetPval: mLin.diagnostics.resetPval,
-      valid: true,
       note: "Постоянные предельные эффекты ∂Y/∂Xⱼ = βⱼ",
     });
-  } catch {
-    // пропуск
-  }
+  } catch {}
 
-  // 2. Линейно-логарифмическая (Lin-Log): Y = b0 + sum b_j ln(X_j)
   if (xAllPositive) {
     try {
       const tmpDf: Record<string, (number | null)[]> = { [depVar]: df[depVar] };
@@ -685,47 +660,37 @@ function compareFunctionalForms(
       });
       const mLinLog = estimateOLS(tmpDf, depVar, lnCols, true, false, 0);
       results.push({
-        formName: "Линейно-логарифмическая (Lin-Log)",
+        formName: "Полулогарифмическая (Lin-Log)",
         formulaStr: `${depVar} = β₀ + Σ βⱼ·ln(Xⱼ)`,
         r2Native: mLinLog.metrics.r2,
         adjR2Native: mLinLog.metrics.adjR2,
         aicComparable: mLinLog.metrics.aic,
         fStat: mLinLog.metrics.fStat,
         resetPval: mLinLog.diagnostics.resetPval,
-        valid: true,
-        note: "Убывающая отдача: рост Xⱼ на 1% меняет Y на 0.01·βⱼ ед.",
+        note: "Рост Xⱼ на 1% меняет Y на 0.01·βⱼ ед.",
       });
-    } catch {
-      // пропуск
-    }
+    } catch {}
   }
 
-  // 3. Полулогарифмическая / Экспоненциальная (Log-Lin): ln(Y) = b0 + sum b_j X_j
   if (yAllPositive) {
     try {
       const tmpDf: Record<string, (number | null)[]> = { ...df };
       tmpDf["__lnY"] = df[depVar].map((v) => (v !== null && v > 0 ? Math.log(v) : null));
       const mLogLin = estimateOLS(tmpDf, "__lnY", indepVars, true, false, 0);
       const sumLnY = mLogLin.seriesData.reduce((a, pt) => a + pt.actual, 0);
-      // Поправка якобиана Бокса — Кокса: AIC_Y = AIC_lnY + 2 * sum(ln(Y_t))
-      const aicAdj = mLogLin.metrics.aic + 2 * sumLnY;
       results.push({
-        formName: "Экспоненциальная (Log-Linear)",
+        formName: "Экспоненциальная (Log-Lin)",
         formulaStr: `ln(${depVar}) = β₀ + Σ βⱼ·Xⱼ`,
         r2Native: mLogLin.metrics.r2,
         adjR2Native: mLogLin.metrics.adjR2,
-        aicComparable: aicAdj,
+        aicComparable: mLogLin.metrics.aic + 2 * sumLnY,
         fStat: mLogLin.metrics.fStat,
         resetPval: mLogLin.diagnostics.resetPval,
-        valid: true,
-        note: "Полуэластичность: рост Xⱼ на 1 ед. меняет Y на (100·βⱼ)%",
+        note: "Рост Xⱼ на 1 ед. меняет Y на (100·βⱼ)%",
       });
-    } catch {
-      // пропуск
-    }
+    } catch {}
   }
 
-  // 4. Степенная / Кобба — Дугласа (Log-Log): ln(Y) = b0 + sum b_j ln(X_j)
   if (yAllPositive && xAllPositive) {
     try {
       const tmpDf: Record<string, (number | null)[]> = {
@@ -739,27 +704,22 @@ function compareFunctionalForms(
       });
       const mLogLog = estimateOLS(tmpDf, "__lnY", lnCols, true, false, 0);
       const sumLnY = mLogLog.seriesData.reduce((a, pt) => a + pt.actual, 0);
-      const aicAdj = mLogLog.metrics.aic + 2 * sumLnY;
       results.push({
         formName: "Степенная Кобба — Дугласа (Log-Log)",
         formulaStr: `ln(${depVar}) = β₀ + Σ βⱼ·ln(Xⱼ)`,
         r2Native: mLogLog.metrics.r2,
         adjR2Native: mLogLog.metrics.adjR2,
-        aicComparable: aicAdj,
+        aicComparable: mLogLog.metrics.aic + 2 * sumLnY,
         fStat: mLogLog.metrics.fStat,
         resetPval: mLogLog.diagnostics.resetPval,
-        valid: true,
         note: "Постоянные эластичности: βⱼ = %ΔY / %ΔXⱼ",
       });
-    } catch {
-      // пропуск
-    }
+    } catch {}
   }
 
   return results;
 }
 
-/** Расчет АКФ, ЧАКФ (Дарбина — Левинсона) и Q-теста Льюнга — Бокса */
 function computeCorrelogram(series: (number | null)[], maxLags = 12) {
   const y = series.filter((v): v is number => v !== null && !isNaN(v));
   const T = y.length;
@@ -776,7 +736,6 @@ function computeCorrelogram(series: (number | null)[], maxLags = 12) {
     acf.push(c0 > 0 ? ck / T / c0 : 0);
   }
 
-  // Рекурсия Дарбина — Левинсона для PACF
   const pacf: number[] = [1];
   const phi: number[][] = Array.from({ length: lagsCount + 1 }, () =>
     Array(lagsCount + 1).fill(0)
@@ -813,24 +772,21 @@ function computeCorrelogram(series: (number | null)[], maxLags = 12) {
     });
   }
 
-  const finalQ = rows[rows.length - 1]?.qStat || 0;
-  const finalP = rows[rows.length - 1]?.pVal || 1;
   return {
     lags: rows,
-    qStat: finalQ,
-    qPval: finalP,
+    qStat: rows[rows.length - 1]?.qStat || 0,
+    qPval: rows[rows.length - 1]?.pVal || 1,
     bartlettBand: Number((1.96 / Math.sqrt(T)).toFixed(4)),
   };
 }
 
-/** Расширенная аналитика цепей Маркова: Фундаментальная матрица Кемени — Снелла Z и время достижения M_ij */
 function computeMarkovChain(series: (number | null)[], steps = 6) {
   const clean = series.filter((v): v is number => v !== null && !isNaN(v));
   const sorted = [...clean].sort((a, b) => a - b);
   const q1 = sorted[Math.floor(sorted.length / 3)] ?? 0;
   const q2 = sorted[Math.floor((2 * sorted.length) / 3)] ?? 0;
 
-  const shortLabels = ["S1 (Спад)", "S2 (Стагнация)", "S3 (Рост)"];
+  const shortLabels = ["S₁ (Спад)", "S₂ (Стагнация)", "S₃ (Рост)"];
   const getState = (v: number) => (v <= q1 ? 0 : v <= q2 ? 1 : 2);
   const states = clean.map(getState);
 
@@ -876,7 +832,6 @@ function computeMarkovChain(series: (number | null)[], steps = 6) {
     pi = nextPi;
   }
 
-  // Фундаментальная матрица Кемени — Снелла: Z = (I - P + W)^(-1), где строки W равны вектору pi
   let Z = [
     [1, 0, 0],
     [0, 1, 0],
@@ -895,17 +850,14 @@ function computeMarkovChain(series: (number | null)[], steps = 6) {
     for (let i = 0; i < 3; i++) {
       for (let j = 0; j < 3; j++) {
         if (i === j) {
-          M[i][j] = 1 / Math.max(pi[i], 1e-4); // Среднее время возврата
+          M[i][j] = 1 / Math.max(pi[i], 1e-4);
         } else {
-          M[i][j] = (Z[j][j] - Z[i][j]) / Math.max(pi[j], 1e-4); // Среднее время первого достижения
+          M[i][j] = (Z[j][j] - Z[i][j]) / Math.max(pi[j], 1e-4);
         }
       }
     }
-  } catch {
-    // если цепь разложима
-  }
+  } catch {}
 
-  // Спектральный анализ матрицы 3x3: lambda_1 = 1, сумма lambda_2 + lambda_3 = tr(P) - 1, произведение = det(P)
   const trP = P[0][0] + P[1][1] + P[2][2];
   const detP =
     P[0][0] * (P[1][1] * P[2][2] - P[1][2] * P[2][1]) -
@@ -981,13 +933,12 @@ function computeADF(series: (number | null)[]) {
 }
 
 // ============================================================================
-// 3. БИБЛИОТЕКА РЕАЛЬНЫХ ЭТАЛОННЫХ ДАТАСЕТОВ (CURATED DATASETS)
+// 2. ЭТАЛОННЫЕ НАБОРЫ ДАННЫХ
 // ============================================================================
 
 interface CuratedDataset {
   id: string;
   title: string;
-  subtitle: string;
   defaultY: string;
   defaultX: string[];
   df: Record<string, (number | null)[]>;
@@ -995,8 +946,6 @@ interface CuratedDataset {
 }
 
 function getCuratedDatasets(): CuratedDataset[] {
-  // 1. МАКРОЭКОНОМИКА РФ И ДКП ЦБ (2014 Q1 – 2025 Q4, 48 кварталов)
-  // Калиброванные исторические ряды квартальной макродинамики РФ
   const ruKeyRate = [
     7.0, 7.5, 8.0, 17.0, 14.0, 11.5, 11.0, 11.0, 11.0, 10.5, 10.0, 10.0, 9.75, 9.0, 8.5, 7.75,
     7.25, 7.25, 7.5, 7.75, 7.75, 7.5, 7.0, 6.25, 6.0, 4.5, 4.25, 4.25, 4.5, 5.5, 6.75, 8.5,
@@ -1024,8 +973,6 @@ function getCuratedDatasets(): CuratedDataset[] {
     Number((-1.8 + 0.34 * ruInvestment[i] - 0.26 * r + 0.032 * ruBrent[i] - 0.12 * ruInflation[i]).toFixed(2))
   );
 
-  // 2. ПРОИЗВОДСТВЕННАЯ ФУНКЦИЯ КОББА — ДУГЛАСА (45 промышленных регионов/кластеров)
-  // Все значения строго положительные для корректного логарифмирования ln(Y) = b0 + a*ln(K) + b*ln(L)
   const cdCapital: number[] = [];
   const cdLabor: number[] = [];
   const cdRD: number[] = [];
@@ -1036,7 +983,6 @@ function getCuratedDatasets(): CuratedDataset[] {
     const L = Number((45 + i * 3.8 + ((i * 13) % 19) * 1.9).toFixed(2));
     const RD = Number((2.1 + ((i * 7) % 15) * 0.45).toFixed(2));
     const E = Number((80 + i * 5.2 + ((i * 11) % 17) * 2.1).toFixed(2));
-    // Истинный закон Кобба — Дугласа: Y = 1.85 * K^0.58 * L^0.44 * RD^0.15
     const Y = Number(
       (1.85 * Math.pow(K, 0.58) * Math.pow(L, 0.44) * Math.pow(RD, 0.15) * (0.97 + ((i * 5) % 9) * 0.008)).toFixed(2)
     );
@@ -1047,7 +993,6 @@ function getCuratedDatasets(): CuratedDataset[] {
     cdOutput.push(Y);
   }
 
-  // 3. КРИВАЯ ФИЛЛИПСА И ЗАКОН ОУКЕНА (40 макропериодов)
   const okUnemp: number[] = [];
   const okWageGr: number[] = [];
   const okMoneyM2: number[] = [];
@@ -1069,8 +1014,7 @@ function getCuratedDatasets(): CuratedDataset[] {
   return [
     {
       id: "ru_macro",
-      title: "1. Макроэкономика РФ и ДКП ЦБ (2014–2025, T=48)",
-      subtitle: "Квартальная динамика ВВП, инвестиций, ключевой ставки ЦБ, ИПЦ, Brent и курса рубля",
+      title: "Макроэкономика РФ (2014–2025, T = 48)",
       defaultY: "GDP_Growth",
       defaultX: ["Investment", "KeyRate", "Brent_USD", "Inflation"],
       df: {
@@ -1083,17 +1027,16 @@ function getCuratedDatasets(): CuratedDataset[] {
       },
       descriptions: {
         GDP_Growth: "Реальный темп прироста ВВП РФ (%, г/г)",
-        Investment: "Норма инвестиций в основной капитал (% к ВВП)",
+        Investment: "Инвестиции в основной капитал (% к ВВП)",
         KeyRate: "Ключевая ставка Банка России (% годовых)",
         Inflation: "Инфляция ИПЦ (%, г/г)",
-        Brent_USD: "Цена нефти марки Brent (USD/баррель)",
-        USD_RUB: "Номинальный курс доллара США к рублю (руб./USD)",
+        Brent_USD: "Нефть марки Brent (USD/баррель)",
+        USD_RUB: "Обменный курс доллара США (руб./USD)",
       },
     },
     {
       id: "cobb_douglas",
-      title: "2. Производственная функция Кобба — Дугласа (T=45)",
-      subtitle: "Отраслевые данные выпуска Y, капитала K, труда L, НИОКР и энергопотребления",
+      title: "Функция Кобба — Дугласа (Отрасли, T = 45)",
       defaultY: "Output_Y",
       defaultX: ["Capital_K", "Labor_L", "RD_Share"],
       df: {
@@ -1104,17 +1047,16 @@ function getCuratedDatasets(): CuratedDataset[] {
         Energy_E: cdEnergy,
       },
       descriptions: {
-        Output_Y: "Валовой отраслевой выпуск продукции Y (млрд руб.)",
+        Output_Y: "Валовой выпуск продукции Y (млрд руб.)",
         Capital_K: "Основные производственные фонды K (млрд руб.)",
-        Labor_L: "Численность занятых в экономике L (тыс. чел.)",
-        RD_Share: "Интенсивность затрат на НИОКР и инновации (%)",
+        Labor_L: "Численность занятых L (тыс. чел.)",
+        RD_Share: "Интенсивность затрат на НИОКР (%)",
         Energy_E: "Промышленное энергопотребление E (млн кВт·ч)",
       },
     },
     {
       id: "phillips_okun",
-      title: "3. Кривая Филлипса и Закон Оукена (T=40)",
-      subtitle: "Взаимосвязь инфляции, уровня безработицы, денежной массы M2 и разрыва ВВП",
+      title: "Кривая Филлипса и Закон Оукена (T = 40)",
       defaultY: "CPI_Inf",
       defaultX: ["Unemp_Rate", "Wage_Growth", "Money_M2"],
       df: {
@@ -1125,24 +1067,24 @@ function getCuratedDatasets(): CuratedDataset[] {
         Output_Gap: okGdpGap,
       },
       descriptions: {
-        CPI_Inf: "Темп инфляции потребительских цен (%)",
-        Unemp_Rate: "Уровень безработицы по методологии МОТ (%)",
-        Wage_Growth: "Темп роста номинальной заработной платы (%)",
-        Money_M2: "Темп прироста денежного агрегата M2 (%)",
-        Output_Gap: "Разрыв выпуска (отклонение ВВП от потенциала, %)",
+        CPI_Inf: "Инфляция потребительских цен (%)",
+        Unemp_Rate: "Уровень безработицы МОТ (%)",
+        Wage_Growth: "Темп роста номинальной зарплаты (%)",
+        Money_M2: "Прирост денежного агрегата M2 (%)",
+        Output_Gap: "Разрыв выпуска ВВП (%)",
       },
     },
   ];
 }
 
-const SERIES_PALETTE = ["#d97706", "#10b981", "#38bdf8", "#a855f7", "#f43f5e", "#eab308"];
+// ============================================================================
+// 3. ГЛАВНЫЙ КОМПОНЕНТ (EDITORIAL / SCIENTIFIC PRINT DESIGN)
+// ============================================================================
 
-// ============================================================================
-// 4. ГЛАВНЫЙ КОМПОНЕНТ «TED // ECONOMETRIC WORKBENCH v2.0»
-// ============================================================================
-export default function TedWorkbench() {
+export default function TedEditorialNotebook() {
   const curatedList = useMemo(() => getCuratedDatasets(), []);
   const [activeDatasetId, setActiveDatasetId] = useState<string>(curatedList[0].id);
+  const [theme, setTheme] = useState<"paper" | "graphite">("paper");
 
   const [df, setDf] = useState<Record<string, (number | null)[]>>(curatedList[0].df);
   const [descriptions, setDescriptions] = useState<Record<string, string>>(
@@ -1154,12 +1096,10 @@ export default function TedWorkbench() {
     "Investment",
     "KeyRate",
   ]);
-  const [searchQuery, setSearchQuery] = useState<string>("");
   const [activeTab, setActiveTab] = useState<
-    "data" | "ols" | "steps" | "specs" | "stats" | "markov"
-  >("ols");
+    "regression" | "matrices" | "timeseries" | "markov" | "data"
+  >("regression");
 
-  // Настройки МНК
   const [depVar, setDepVar] = useState<string>(curatedList[0].defaultY);
   const [regressors, setRegressors] = useState<string[]>(curatedList[0].defaultX);
   const [includeConst, setIncludeConst] = useState<boolean>(true);
@@ -1176,25 +1116,25 @@ export default function TedWorkbench() {
   ]);
   const [activeModelId, setActiveModelId] = useState<number>(1);
 
-  // Редактор данных и генератор формул
   const [newColName, setNewColName] = useState<string>("");
   const [newColFormula, setNewColFormula] = useState<string>("");
   const [pasteBuffer, setPasteBuffer] = useState<string>("");
   const [showPasteModal, setShowPasteModal] = useState<boolean>(false);
 
-  // Марков и временные ряды
   const [markovVar, setMarkovVar] = useState<string>(curatedList[0].defaultY);
   const [tsVar, setTsVar] = useState<string>(curatedList[0].defaultY);
   const [copiedType, setCopiedType] = useState<string | null>(null);
-  const [statusLine, setStatusLine] = useState<string>(
-    "Загружен эталонный датасет: Макроэкономика РФ (2014–2025, T = 48 кварталов)."
-  );
+  const [notice, setNotice] = useState<string>("");
 
   const varNames = Object.keys(df);
   const nRows = varNames.length > 0 ? df[varNames[0]].length : 0;
   const activeModel = models.find((m) => m.id === activeModelId) || models[models.length - 1];
 
-  // Переключение между эталонными датасетами
+  const notify = (msg: string) => {
+    setNotice(msg);
+    setTimeout(() => setNotice(""), 4000);
+  };
+
   const handleSelectCuratedDataset = (datasetId: string) => {
     const found = curatedList.find((d) => d.id === datasetId);
     if (!found) return;
@@ -1218,10 +1158,9 @@ export default function TedWorkbench() {
     );
     setModels((prev) => [...prev, newModel]);
     setActiveModelId(nextId);
-    setStatusLine(`Активирован датасет: ${found.title}. Автоматически оценена Модель #${nextId}.`);
+    notify(`Загружен набор: ${found.title}`);
   };
 
-  // Детальная статистика по всем переменным
   const varStats = useMemo(() => {
     return varNames.map((name, idx) => {
       const clean = df[name].filter((v): v is number => v !== null && !isNaN(v));
@@ -1247,7 +1186,7 @@ export default function TedWorkbench() {
       return {
         id: idx + 1,
         name,
-        desc: descriptions[name] || "Пользовательский ряд",
+        desc: descriptions[name] || "Производный ряд",
         mean,
         median,
         std,
@@ -1260,14 +1199,6 @@ export default function TedWorkbench() {
     });
   }, [df, descriptions, varNames]);
 
-  const filteredVars = useMemo(() => {
-    if (!searchQuery.trim()) return varStats;
-    const q = searchQuery.toLowerCase();
-    return varStats.filter(
-      (v) => v.name.toLowerCase().includes(q) || v.desc.toLowerCase().includes(q)
-    );
-  }, [varStats, searchQuery]);
-
   const toggleSelectVar = (name: string) => {
     setSelectedVars((prev) =>
       prev.includes(name) ? prev.filter((v) => v !== name) : [...prev, name]
@@ -1276,21 +1207,18 @@ export default function TedWorkbench() {
 
   const deleteVariable = (name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (varNames.length <= 2) {
-      setStatusLine("Нельзя удалить последние переменные из датасета.");
-      return;
-    }
+    if (varNames.length <= 2) return;
     const nextDf = { ...df };
     delete nextDf[name];
     setDf(nextDf);
     setSelectedVars((prev) => prev.filter((v) => v !== name));
     setRegressors((prev) => prev.filter((v) => v !== name));
-    setStatusLine(`Переменная «${name}» удалена.`);
+    notify(`Удалена переменная ${name}`);
   };
 
   const applyTransformation = (mode: "log" | "diff" | "lag1" | "pch") => {
     if (selectedVars.length === 0) {
-      setStatusLine("Отметьте переменные в левом списке для трансформации.");
+      notify("Сначала отметьте переменные на верхней полке.");
       return;
     }
 
@@ -1324,7 +1252,7 @@ export default function TedWorkbench() {
             ? Number((v - (series[i - 1] as number)).toFixed(5))
             : null
         );
-        nextDesc[newName] = `Δ${col} = ${col}(t) - ${col}(t-1)`;
+        nextDesc[newName] = `Δ${col}`;
       } else if (mode === "lag1") {
         nextDf[newName] = series.map((_, i) => (i > 0 ? series[i - 1] : null));
         nextDesc[newName] = `${col}(t-1)`;
@@ -1339,29 +1267,23 @@ export default function TedWorkbench() {
               )
             : null
         );
-        nextDesc[newName] = `Темп прироста ${col} (%)`;
+        nextDesc[newName] = `%Δ${col}`;
       }
       created.push(newName);
     }
 
-    if (created.length === 0) {
-      setStatusLine("Указанные трансформации уже существуют в реестре.");
-      return;
+    if (created.length > 0) {
+      setDf(nextDf);
+      setDescriptions(nextDesc);
+      notify(`Добавлено: ${created.join(", ")}`);
     }
-
-    setDf(nextDf);
-    setDescriptions(nextDesc);
-    setStatusLine(`Создано переменных (${created.length}): ${created.join(", ")}`);
   };
 
   const handleCreateByFormula = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = newColName.trim().replace(/\s+/g, "_");
     const expr = newColFormula.trim();
-    if (!cleanName) {
-      setStatusLine("Укажите имя нового столбца.");
-      return;
-    }
+    if (!cleanName) return;
 
     try {
       const resultCol: (number | null)[] = [];
@@ -1405,13 +1327,13 @@ export default function TedWorkbench() {
       setDf((prev) => ({ ...prev, [cleanName]: resultCol }));
       setDescriptions((prev) => ({
         ...prev,
-        [cleanName]: expr ? `Формула: ${expr}` : "Ручной ввод данных",
+        [cleanName]: expr ? `= ${expr}` : "Ручной ввод",
       }));
       setNewColName("");
       setNewColFormula("");
-      setStatusLine(`Создан столбец «${cleanName}».`);
+      notify(`Создана переменная ${cleanName}`);
     } catch {
-      setStatusLine("Ошибка формулы. Пример: KeyRate - Inflation или ln(Investment) * 2");
+      notify("Ошибка в синтаксисе формулы.");
     }
   };
 
@@ -1430,19 +1352,13 @@ export default function TedWorkbench() {
   const addObservationRow = () => {
     setDf((prev) => {
       const next: Record<string, (number | null)[]> = {};
-      for (const k of Object.keys(prev)) {
-        next[k] = [...prev[k], 0];
-      }
+      for (const k of Object.keys(prev)) next[k] = [...prev[k], 0];
       return next;
     });
-    setStatusLine(`Добавлено наблюдение t = ${nRows + 1}.`);
   };
 
   const deleteObservationRow = (rowIdx: number) => {
-    if (nRows <= 5) {
-      setStatusLine("Минимальный размер выборки — 5 наблюдений.");
-      return;
-    }
+    if (nRows <= 5) return;
     setDf((prev) => {
       const next: Record<string, (number | null)[]> = {};
       for (const k of Object.keys(prev)) {
@@ -1450,7 +1366,6 @@ export default function TedWorkbench() {
       }
       return next;
     });
-    setStatusLine(`Удалено наблюдение t = ${rowIdx + 1}.`);
   };
 
   const handlePasteFromExcel = () => {
@@ -1458,21 +1373,18 @@ export default function TedWorkbench() {
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter(Boolean);
-    if (lines.length < 2) {
-      setStatusLine("Вставьте минимум 2 строки (заголовки + данные).");
-      return;
-    }
+    if (lines.length < 2) return;
 
     const sep = lines[0].includes("\t") ? "\t" : lines[0].includes(";") ? ";" : ",";
     const headers = lines[0]
       .split(sep)
-      .map((h, i) => h.trim().replace(/^"|"$/g, "").replace(/\s+/g, "_") || `Var_${i + 1}`);
+      .map((h, i) => h.trim().replace(/^"|"$/g, "").replace(/\s+/g, "_") || `X_${i + 1}`);
 
     const newDf: Record<string, (number | null)[]> = {};
     const newDesc: Record<string, string> = {};
     headers.forEach((h) => {
       newDf[h] = [];
-      newDesc[h] = "Вставлено из буфера обмена";
+      newDesc[h] = "Импорт из Excel";
     });
 
     for (let i = 1; i < lines.length; i++) {
@@ -1493,25 +1405,20 @@ export default function TedWorkbench() {
     setTsVar(headers[0]);
     setShowPasteModal(false);
     setPasteBuffer("");
-    setStatusLine(`Импортировано из Excel: ${lines.length - 1} строк, ${headers.length} переменных.`);
+    notify(`Импортировано ${lines.length - 1} наблюдений.`);
   };
 
   const handleRunOLS = () => {
     const targetX = regressors.filter((x) => x !== depVar);
-    if (targetX.length === 0) {
-      setStatusLine("Ошибка: выберите хотя бы один регрессор X.");
-      return;
-    }
+    if (targetX.length === 0) return;
     try {
       const nextId = models.length + 1;
       const res = estimateOLS(df, depVar, targetX, includeConst, useHC3, nextId);
       setModels((prev) => [...prev, res]);
       setActiveModelId(nextId);
-      setStatusLine(
-        `Модель #${nextId} оценена (T = ${res.nObs}, R² = ${res.metrics.r2.toFixed(4)}, F = ${res.metrics.fStat.toFixed(2)}).`
-      );
+      notify(`Оценена Модель ${nextId} (R² = ${res.metrics.r2.toFixed(4)})`);
     } catch (err: unknown) {
-      setStatusLine(`Ошибка МНК: ${err instanceof Error ? err.message : String(err)}`);
+      notify(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -1522,14 +1429,12 @@ export default function TedWorkbench() {
       newCol[pt.rowIdx] = type === "resid" ? pt.resid : pt.fitted;
     }
     const colName = type === "resid" ? `uhat_${activeModel.id}` : `yhat_${activeModel.id}`;
-    const colDesc =
-      type === "resid"
-        ? `Остатки Модели #${activeModel.id} (${activeModel.depVar})`
-        : `Расчетные значения Модели #${activeModel.id} (${activeModel.depVar})`;
-
     setDf((prev) => ({ ...prev, [colName]: newCol }));
-    setDescriptions((prev) => ({ ...prev, [colName]: colDesc }));
-    setStatusLine(`Ряд «${colName}» добавлен в реестр переменных.`);
+    setDescriptions((prev) => ({
+      ...prev,
+      [colName]: type === "resid" ? `Остатки Модели ${activeModel.id}` : `Прогноз Модели ${activeModel.id}`,
+    }));
+    notify(`Ряд ${colName} сохранен в список переменных.`);
   };
 
   const formattedEquation = useMemo(() => {
@@ -1537,11 +1442,11 @@ export default function TedWorkbench() {
     const parts: string[] = [];
     activeModel.coefficients.forEach((c, idx) => {
       const val = Math.abs(c.beta).toFixed(4);
-      const sign = c.beta >= 0 ? (idx === 0 ? "" : " + ") : idx === 0 ? "-" : " - ";
+      const sign = c.beta >= 0 ? (idx === 0 ? "" : " + ") : idx === 0 ? "−" : " − ";
       if (c.name === "const") {
         parts.push(`${sign}${val}`);
       } else {
-        parts.push(`${sign}${val}·${c.name}`);
+        parts.push(`${sign}${val} · ${c.name}`);
       }
     });
     return `${activeModel.depVar} = ${parts.join("")}`;
@@ -1561,37 +1466,27 @@ export default function TedWorkbench() {
       const latex = [
         "\\begin{table}[htbp]\\centering",
         `\\caption{Оценка МНК-модели (зависимая переменная: ${activeModel.depVar.replace(/_/g, "\\_")})}`,
-        "\\begin{tabular}{lcccc}\\hline\\hline",
-        "Переменная & Коэффициент & Ст. ошибка & $t$-стат. & $p$-value \\\\ \\hline",
+        "\\begin{tabular}{lcccc}\\toprule",
+        "Переменная & Коэффициент & Ст. ошибка & $t$-стат. & $p$-value \\\\ \\midrule",
         rows,
-        "\\hline",
+        "\\midrule",
         `Наблюдений ($T$) & \\multicolumn{4}{c}{${activeModel.nObs}} \\\\`,
         `$R^2$ / Скорр. $R^2$ & \\multicolumn{4}{c}{${activeModel.metrics.r2.toFixed(4)} / ${activeModel.metrics.adjR2.toFixed(4)}} \\\\`,
         `$F$-статистика & \\multicolumn{4}{c}{${activeModel.metrics.fStat.toFixed(2)} ($p = ${activeModel.metrics.fPval.toExponential(2)}$)} \\\\`,
-        "\\hline\\hline\\end{tabular}\\end{table}",
+        "\\bottomrule\\end{tabular}\\end{table}",
       ].join("\n");
       navigator.clipboard.writeText(latex);
       setCopiedType("latex");
-      setStatusLine("Код таблицы LaTeX скопирован в буфер обмена.");
     } else {
       const text = [
-        `МОДЕЛЬ #${activeModel.id} (МНК, T = ${activeModel.nObs})`,
+        `МОДЕЛЬ ${activeModel.id} (МНК, T = ${activeModel.nObs})`,
         `Уравнение: ${formattedEquation}`,
         `R² = ${activeModel.metrics.r2.toFixed(4)} | Adj. R² = ${activeModel.metrics.adjR2.toFixed(4)} | F = ${activeModel.metrics.fStat.toFixed(2)} | DW = ${activeModel.metrics.dw.toFixed(4)}`,
-        "",
-        "Коэффициенты:",
-        ...activeModel.coefficients.map(
-          (c) =>
-            `${c.name.padEnd(16)} beta=${c.beta.toFixed(5)} se=${c.se.toFixed(5)} t=${c.tStat.toFixed(
-              3
-            )} p=${c.pValue.toFixed(4)} ${c.stars}`
-        ),
       ].join("\n");
       navigator.clipboard.writeText(text);
       setCopiedType("text");
-      setStatusLine("Текстовый отчет скопирован в буфер обмена.");
     }
-    setTimeout(() => setCopiedType(null), 2200);
+    setTimeout(() => setCopiedType(null), 2000);
   };
 
   const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1613,7 +1508,7 @@ export default function TedWorkbench() {
 
       headers.forEach((h) => {
         newDf[h] = [];
-        newDesc[h] = `Импорт: ${file.name}`;
+        newDesc[h] = `Файл ${file.name}`;
       });
 
       for (let i = 1; i < lines.length; i++) {
@@ -1628,10 +1523,7 @@ export default function TedWorkbench() {
       const numericHeaders = headers.filter((h) =>
         newDf[h].some((v) => v !== null && !isNaN(v))
       );
-      if (numericHeaders.length === 0) {
-        setStatusLine("Ошибка: в CSV не найдено числовых данных.");
-        return;
-      }
+      if (numericHeaders.length === 0) return;
 
       const filteredDf: Record<string, (number | null)[]> = {};
       numericHeaders.forEach((h) => (filteredDf[h] = newDf[h]));
@@ -1643,7 +1535,7 @@ export default function TedWorkbench() {
       setRegressors(numericHeaders.slice(1, 4));
       setMarkovVar(numericHeaders[0]);
       setTsVar(numericHeaders[0]);
-      setStatusLine(`Импортирован файл ${file.name} (T = ${lines.length - 1}).`);
+      notify(`Загружен ${file.name} (T = ${lines.length - 1})`);
     };
     reader.readAsText(file);
   };
@@ -1658,11 +1550,10 @@ export default function TedWorkbench() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "ted_data.csv";
+    a.download = "ted_dataset.csv";
     a.click();
   };
 
-  // Расчеты для спецвкладок
   const specComparisons = useMemo(() => {
     const targetX = regressors.filter((x) => x !== depVar && df[x] !== undefined);
     if (!df[depVar] || targetX.length === 0) return [];
@@ -1682,412 +1573,1383 @@ export default function TedWorkbench() {
     [df, tsVar, varNames]
   );
 
-  const multiSeriesChartData = useMemo(() => {
-    const vars = selectedVars.length > 0 ? selectedVars : [varNames[0]];
-    return Array.from({ length: nRows }, (_, i) => {
-      const row: Record<string, number | null> = { t: i + 1 };
-      vars.forEach((v) => (row[v] = df[v]?.[i] ?? null));
-      return row;
-    });
-  }, [df, selectedVars, varNames, nRows]);
+  const isPaper = theme === "paper";
+  const chartColors = {
+    grid: isPaper ? "#E6E2D8" : "#262626",
+    axis: isPaper ? "#57534E" : "#8E8E93",
+    actual: isPaper ? "#1E3A5F" : "#60A5FA",
+    fitted: isPaper ? "#991B1B" : "#F87171",
+    accent: isPaper ? "#166534" : "#34D399",
+    tooltipBg: isPaper ? "#FDFBF7" : "#1C1C1E",
+    tooltipBorder: isPaper ? "#D6D1C7" : "#3A3A3C",
+  };
 
   return (
-    <div className="ted-shell">
+    <div className={`notebook-root ${isPaper ? "theme-paper" : "theme-graphite"}`}>
+      {/* АКАДЕМИЧЕСКАЯ ГАЗЕТНО-ЖУРНАЛЬНАЯ ВЕРСТКА (BOOKTABS & SERIF MATH) */}
       <style
         dangerouslySetInnerHTML={{
           __html: `
         * { box-sizing: border-box; }
+        .theme-paper {
+          --bg-canvas: #F4F1EA;
+          --bg-sheet: #FCFBF9;
+          --bg-subtle: #EFECE4;
+          --ink: #18181B;
+          --ink-muted: #656059;
+          --rule-light: #DFDBD0;
+          --rule-heavy: #18181B;
+          --accent: #1E3A5F;
+          --accent-soft: rgba(30, 58, 95, 0.08);
+          --crimson: #991B1B;
+          --forest: #166534;
+        }
+        .theme-graphite {
+          --bg-canvas: #0F0F10;
+          --bg-sheet: #171719;
+          --bg-subtle: #202023;
+          --ink: #EDEDEF;
+          --ink-muted: #8E8E95;
+          --rule-light: #2A2A2E;
+          --rule-heavy: #A1A1AA;
+          --accent: #60A5FA;
+          --accent-soft: rgba(96, 165, 250, 0.12);
+          --crimson: #F87171;
+          --forest: #34D399;
+        }
         body, html {
           margin: 0;
           padding: 0;
-          background-color: #101214;
-          color: #e4e4e7;
-          font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          font-size: 13px;
+          font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+          font-size: 14px;
+          line-height: 1.55;
           -webkit-font-smoothing: antialiased;
         }
-        .mono {
-          font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
-        }
-        .ted-shell {
+        .notebook-root {
           min-height: 100vh;
-          display: flex;
-          flex-direction: column;
-          background-color: #101214;
+          background-color: var(--bg-canvas);
+          color: var(--ink);
+          padding-bottom: 60px;
+          transition: background-color 0.2s, color 0.2s;
         }
-        .topbar {
-          min-height: 54px;
-          background: #16181d;
-          border-bottom: 1px solid #272a30;
-          padding: 8px 20px;
+        .serif-math {
+          font-family: "Georgia", "Times New Roman", "Cambria", serif;
+        }
+        .num {
+          font-family: "JetBrains Mono", "Consolas", "SF Mono", monospace;
+          font-variant-numeric: tabular-nums;
+          font-size: 13px;
+        }
+        /* Контейнер печатного листа */
+        .page-container {
+          max-width: 1220px;
+          margin: 0 auto;
+          padding: 0 28px;
+        }
+        /* Минималистичная шапка в духе научного издания */
+        .editorial-header {
+          border-bottom: 2px solid var(--rule-heavy);
+          padding: 22px 0 16px 0;
+          margin-bottom: 20px;
           display: flex;
           flex-wrap: wrap;
-          align-items: center;
+          align-items: baseline;
           justify-content: space-between;
-          gap: 12px;
+          gap: 16px;
         }
-        .brand-box {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        .brand-mark {
-          padding: 4px 8px;
-          background: #d97706;
-          color: #090a0c;
-          font-weight: 900;
-          font-size: 13px;
-          letter-spacing: 0.08em;
-          border-radius: 3px;
-        }
-        .brand-name {
-          font-size: 14px;
+        .journal-title {
+          font-family: "Georgia", "Times New Roman", serif;
+          font-size: 26px;
           font-weight: 700;
-          color: #f4f4f5;
-          letter-spacing: 0.02em;
+          letter-spacing: -0.02em;
+          margin: 0;
+          color: var(--ink);
         }
-        .brand-meta {
-          color: #71717a;
-          font-size: 12px;
-          border-left: 1px solid #272a30;
-          padding-left: 12px;
+        .journal-sub {
+          font-size: 13px;
+          color: var(--ink-muted);
+          margin-left: 14px;
+          font-weight: 400;
         }
-        .btn {
+        /* Кнопки без лишнего шума */
+        .ui-btn {
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          padding: 6px 12px;
-          font-size: 12px;
-          font-weight: 600;
-          border-radius: 4px;
-          background: #1f232b;
-          color: #e4e4e7;
-          border: 1px solid #323741;
+          padding: 6px 13px;
+          font-size: 12.5px;
+          font-weight: 500;
+          color: var(--ink);
+          background: var(--bg-sheet);
+          border: 1px solid var(--rule-light);
+          border-radius: 3px;
           cursor: pointer;
-          transition: background 0.12s, border-color 0.12s;
+          transition: all 0.15s;
         }
-        .btn:hover {
-          background: #292e38;
-          border-color: #52525b;
+        .ui-btn:hover {
+          border-color: var(--ink);
         }
-        .btn-amber {
-          background: #d97706;
-          color: #090a0c;
-          border: 1px solid #f59e0b;
-          font-weight: 700;
+        .ui-btn-primary {
+          background: var(--accent);
+          color: #FFFFFF;
+          border-color: var(--accent);
+          font-weight: 600;
         }
-        .btn-amber:hover {
-          background: #f59e0b;
+        .theme-graphite .ui-btn-primary {
+          color: #09090B;
         }
-        .btn-sm {
-          padding: 4px 8px;
-          font-size: 11px;
+        .ui-btn-primary:hover {
+          opacity: 0.92;
         }
-        .main-layout {
-          flex: 1;
-          display: grid;
-          grid-template-columns: 300px 1fr;
-          height: calc(100vh - 82px);
-          overflow: hidden;
-        }
-        @media (max-width: 980px) {
-          .main-layout {
-            grid-template-columns: 1fr;
-            height: auto;
-            overflow: visible;
-          }
-        }
-        .var-sidebar {
-          background: #14161a;
-          border-right: 1px solid #272a30;
-          display: flex;
-          flex-direction: column;
-          height: 100%;
-          overflow: hidden;
-        }
-        .sidebar-header {
-          padding: 12px 14px;
-          border-bottom: 1px solid #272a30;
-          background: #16191e;
-        }
-        .search-input {
-          width: 100%;
-          padding: 6px 10px 6px 28px;
-          background: #0d0f12;
-          border: 1px solid #272a30;
-          border-radius: 4px;
-          color: #e4e4e7;
-          font-size: 12px;
+        .ui-select {
+          padding: 6px 12px;
+          font-size: 13px;
+          color: var(--ink);
+          background: var(--bg-sheet);
+          border: 1px solid var(--rule-light);
+          border-radius: 3px;
           outline: none;
         }
-        .search-input:focus {
-          border-color: #d97706;
+        .ui-select:focus {
+          border-color: var(--accent);
         }
-        .var-scroll-list {
-          flex: 1;
-          overflow-y: auto;
+        /* Горизонтальная полка переменных (вместо тесного сайдбара) */
+        .var-shelf {
+          background: var(--bg-sheet);
+          border: 1px solid var(--rule-light);
+          padding: 14px 18px;
+          margin-bottom: 24px;
         }
-        .var-row {
-          flex-shrink: 0;
-          min-height: 48px;
-          padding: 8px 12px;
-          border-bottom: 1px solid #1e2128;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 8px;
-          cursor: pointer;
-          transition: background 0.1s;
-        }
-        .var-row:hover {
-          background: #1b1e25;
-        }
-        .var-row.selected {
-          background: rgba(217, 119, 6, 0.12);
-          border-left: 3px solid #d97706;
-        }
-        .del-btn {
-          opacity: 0.35;
-          background: none;
-          border: none;
-          color: #a1a1aa;
-          cursor: pointer;
-          padding: 3px;
-        }
-        .del-btn:hover {
-          opacity: 1;
-          color: #ef4444;
-        }
-        .content-pane {
-          display: flex;
-          flex-direction: column;
-          height: 100%;
-          overflow: hidden;
-          background: #101214;
-        }
-        .nav-tabs {
+        .var-shelf-top {
           display: flex;
           flex-wrap: wrap;
-          background: #16181d;
-          border-bottom: 1px solid #272a30;
-          padding: 0 16px;
-          gap: 2px;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding-bottom: 10px;
+          border-bottom: 1px solid var(--rule-light);
+          margin-bottom: 12px;
         }
-        .nav-tab {
+        .var-pills-wrap {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .var-pill {
           display: inline-flex;
           align-items: center;
-          gap: 6px;
-          padding: 11px 14px;
-          font-size: 12px;
+          gap: 8px;
+          padding: 5px 11px;
+          font-size: 12.5px;
+          border: 1px solid var(--rule-light);
+          background: var(--bg-canvas);
+          color: var(--ink);
+          cursor: pointer;
+          user-select: none;
+          transition: all 0.12s;
+        }
+        .var-pill.active {
+          border-color: var(--accent);
+          background: var(--accent-soft);
           font-weight: 600;
-          color: #a1a1aa;
-          background: transparent;
+        }
+        /* Чистая навигация по разделам */
+        .section-tabs {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 28px;
+          border-bottom: 1px solid var(--rule-light);
+          margin-bottom: 28px;
+        }
+        .sec-tab {
+          padding: 10px 0;
+          font-size: 14px;
+          font-weight: 500;
+          color: var(--ink-muted);
+          background: none;
           border: none;
           border-bottom: 2px solid transparent;
           cursor: pointer;
+          transition: color 0.15s;
         }
-        .nav-tab:hover {
-          color: #f4f4f5;
+        .sec-tab:hover {
+          color: var(--ink);
         }
-        .nav-tab.active {
-          color: #f59e0b;
-          border-bottom-color: #d97706;
-          background: rgba(217, 119, 6, 0.05);
-        }
-        .workspace-scroll {
-          flex: 1;
-          overflow-y: auto;
-          padding: 20px;
-          display: flex;
-          flex-direction: column;
-          gap: 18px;
-        }
-        .panel {
-          background: #16181d;
-          border: 1px solid #272a30;
-          border-radius: 4px;
-        }
-        .panel-head {
-          padding: 10px 16px;
-          border-bottom: 1px solid #272a30;
-          background: #191c22;
-          display: flex;
-          flex-wrap: wrap;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-        }
-        .panel-title {
-          font-size: 12px;
+        .sec-tab.active {
+          color: var(--ink);
           font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
-          color: #e4e4e7;
-          margin: 0;
+          border-bottom-color: var(--ink);
         }
-        .panel-body {
-          padding: 16px;
+        /* Лист отчета (Paper Sheet) */
+        .paper-sheet {
+          background: var(--bg-sheet);
+          border: 1px solid var(--rule-light);
+          padding: 28px 32px;
+          margin-bottom: 28px;
         }
-        .data-table {
+        .sheet-heading {
+          font-family: "Georgia", "Times New Roman", serif;
+          font-size: 19px;
+          font-weight: 700;
+          margin: 0 0 6px 0;
+          color: var(--ink);
+        }
+        .sheet-desc {
+          font-size: 13px;
+          color: var(--ink-muted);
+          margin: 0 0 20px 0;
+        }
+        /* Академические таблицы LaTeX booktabs (без вертикальных линий и рамок) */
+        .booktabs {
           width: 100%;
           border-collapse: collapse;
-          font-size: 12px;
+          border-top: 2px solid var(--rule-heavy);
+          border-bottom: 2px solid var(--rule-heavy);
+          margin: 14px 0;
         }
-        .data-table th {
-          background: #131519;
-          color: #a1a1aa;
-          font-weight: 600;
+        .booktabs th {
+          font-family: "Georgia", "Times New Roman", serif;
+          font-weight: 700;
+          font-size: 13px;
+          color: var(--ink);
           text-align: left;
-          padding: 8px 12px;
-          border-bottom: 1px solid #2e323b;
+          padding: 9px 12px;
+          border-bottom: 1px solid var(--rule-heavy);
           white-space: nowrap;
         }
-        .data-table td {
-          padding: 7px 12px;
-          border-bottom: 1px solid #20232a;
-          color: #e4e4e7;
+        .booktabs td {
+          padding: 8px 12px;
+          border-bottom: 1px solid var(--rule-light);
+          color: var(--ink);
         }
-        .data-table tr:hover td {
-          background: #1c1f26;
+        .booktabs tr:last-child td {
+          border-bottom: none;
         }
-        .cell-input {
-          width: 100%;
-          min-width: 75px;
-          background: transparent;
-          border: 1px solid transparent;
-          color: #f4f4f5;
-          text-align: right;
-          padding: 3px 6px;
-          border-radius: 3px;
-          font-family: "JetBrains Mono", "Consolas", monospace;
-          font-size: 12px;
+        .booktabs tr:hover td {
+          background: var(--accent-soft);
         }
-        .cell-input:hover {
-          border-color: #323741;
-          background: #101214;
+        /* Блок математической формулы (как в Wolfram / LaTeX equation) */
+        .math-display {
+          font-family: "Georgia", "Times New Roman", serif;
+          font-size: 17px;
+          padding: 16px 22px;
+          background: var(--bg-subtle);
+          border-left: 3px solid var(--accent);
+          margin: 16px 0 22px 0;
+          overflow-x: auto;
         }
-        .cell-input:focus {
-          outline: none;
-          border-color: #d97706;
-          background: #090a0c;
-        }
-        .input-field {
-          background: #0d0f12;
-          border: 1px solid #323741;
-          border-radius: 4px;
-          padding: 6px 10px;
-          color: #f4f4f5;
-          font-size: 12px;
-          outline: none;
-        }
-        .input-field:focus {
-          border-color: #d97706;
-        }
-        .grid-2 {
+        .two-columns {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 16px;
+          gap: 28px;
         }
-        .grid-4 {
+        .four-metrics {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
-          gap: 12px;
+          gap: 20px;
+          padding: 16px 0;
+          border-top: 1px solid var(--rule-light);
+          border-bottom: 1px solid var(--rule-light);
+          margin: 20px 0;
         }
-        @media (max-width: 1024px) {
-          .grid-2, .grid-4 { grid-template-columns: 1fr; }
+        @media (max-width: 920px) {
+          .two-columns, .four-metrics { grid-template-columns: 1fr; }
+          .paper-sheet { padding: 18px; }
         }
-        .stat-box {
-          background: #121418;
-          border: 1px solid #272a30;
-          padding: 10px 14px;
-          border-radius: 4px;
+        .cell-edit {
+          width: 100%;
+          min-width: 72px;
+          text-align: right;
+          background: transparent;
+          border: 1px solid transparent;
+          color: var(--ink);
+          padding: 3px 6px;
+          font-family: "JetBrains Mono", monospace;
+          font-size: 13px;
         }
-        .tag-chip {
-          display: inline-flex;
-          align-items: center;
-          padding: 5px 10px;
-          border-radius: 3px;
-          font-size: 12px;
-          background: #121418;
-          border: 1px solid #2e323b;
-          color: #a1a1aa;
-          cursor: pointer;
-        }
-        .tag-chip.active {
-          background: rgba(217, 119, 6, 0.16);
-          border-color: #d97706;
-          color: #fbbf24;
-          font-weight: 600;
-        }
-        .statusbar {
-          height: 28px;
-          background: #16181d;
-          border-top: 1px solid #272a30;
-          padding: 0 20px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          font-size: 11.5px;
-          color: #a1a1aa;
-        }
-        .step-block {
-          background: #121418;
-          border-left: 3px solid #d97706;
-          padding: 12px 16px;
-          margin-bottom: 12px;
-          border-radius: 0 4px 4px 0;
+        .cell-edit:focus {
+          outline: none;
+          border-color: var(--accent);
+          background: var(--bg-canvas);
         }
       `,
         }}
       />
 
-      {/* ВЕРХНЯЯ ПАНЕЛЬ С БИБЛИОТЕКОЙ РЕАЛЬНЫХ ДАТАСЕТОВ */}
-      <header className="topbar">
-        <div className="brand-box">
-          <span className="brand-mark mono">TED</span>
-          <span className="brand-name">ECONOMETRIC WORKBENCH</span>
-          <span className="brand-meta mono">
-            T = {nRows} | K = {varNames.length}
-          </span>
-        </div>
+      <div className="page-container">
+        {/* ШАПКА ИЗДАНИЯ */}
+        <header className="editorial-header">
+          <div>
+            <h1 className="journal-title">
+              TED
+              <span className="journal-sub">
+                Аналитическая система эконометрических исследований (T = {nRows}, K = {varNames.length})
+              </span>
+            </h1>
+          </div>
 
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <Database size={14} color="#d97706" />
-            <span style={{ fontSize: "11.5px", color: "#a1a1aa", fontWeight: 600 }}>
-              Эталонный набор:
-            </span>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px" }}>
             <select
               value={activeDatasetId}
               onChange={(e) => handleSelectCuratedDataset(e.target.value)}
-              className="input-field mono"
-              style={{ minWidth: "280px", fontWeight: 600, color: "#fbbf24" }}
+              className="ui-select"
+              title="Выбор эталонного набора данных"
             >
               {curatedList.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.title}
+                  Набор: {d.title}
                 </option>
               ))}
             </select>
+
+            <button onClick={() => setShowPasteModal(true)} className="ui-btn">
+              <Plus size={14} /> Вставить из Excel
+            </button>
+            <label className="ui-btn">
+              <Upload size={14} /> CSV
+              <input type="file" accept=".csv" onChange={handleCSVUpload} style={{ display: "none" }} />
+            </label>
+            <button onClick={exportToCSV} className="ui-btn">
+              <Download size={14} /> Скачать
+            </button>
+
+            <button
+              onClick={() => setTheme(isPaper ? "graphite" : "paper")}
+              className="ui-btn"
+              title="Переключить оформление: Бумага / Графит"
+            >
+              {isPaper ? <Moon size={14} /> : <Sun size={14} />}
+              <span>{isPaper ? "Графит" : "Бумага"}</span>
+            </button>
+          </div>
+        </header>
+
+        {/* КОМПАКТНАЯ ПОЛКА ПЕРЕМЕННЫХ (ВМЕСТО ГРОМОЗДКОГО ЛЕВОГО САЙДБАРА) */}
+        <section className="var-shelf">
+          <div className="var-shelf-top">
+            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>
+              <strong style={{ color: "var(--ink)" }}>Рабочие переменные ({varNames.length}):</strong>{" "}
+              кликните для выделения, затем примените оператор преобразования
+              {notice && (
+                <span style={{ marginLeft: "14px", color: "var(--forest)", fontWeight: 600 }}>
+                  — {notice}
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              <button onClick={() => applyTransformation("log")} className="ui-btn serif-math">
+                + <i>ln</i>(<i>X</i>)
+              </button>
+              <button onClick={() => applyTransformation("diff")} className="ui-btn serif-math">
+                + Δ<i>X</i>
+              </button>
+              <button onClick={() => applyTransformation("lag1")} className="ui-btn serif-math">
+                + <i>X</i><sub>t−1</sub>
+              </button>
+              <button onClick={() => applyTransformation("pch")} className="ui-btn serif-math">
+                + %Δ<i>X</i>
+              </button>
+            </div>
           </div>
 
-          <button onClick={() => setShowPasteModal(true)} className="btn">
-            <Plus size={14} /> Вставить из Excel
-          </button>
-          <label className="btn">
-            <Upload size={14} /> Импорт CSV
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleCSVUpload}
-              style={{ display: "none" }}
-            />
-          </label>
-          <button onClick={exportToCSV} className="btn">
-            <Download size={14} /> Экспорт CSV
-          </button>
-        </div>
-      </header>
+          <div className="var-pills-wrap">
+            {varStats.map((v) => {
+              const isSel = selectedVars.includes(v.name);
+              return (
+                <div
+                  key={v.name}
+                  onClick={() => toggleSelectVar(v.name)}
+                  className={`var-pill ${isSel ? "active" : ""}`}
+                  title={v.desc}
+                >
+                  <span>{v.name}</span>
+                  <span className="num" style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>
+                    μ={v.mean.toFixed(1)}
+                  </span>
+                  {varNames.length > 2 && (
+                    <span
+                      onClick={(e) => deleteVariable(v.name, e)}
+                      style={{ color: "var(--ink-muted)", fontSize: "11px", marginLeft: "2px" }}
+                      title="Удалить переменную"
+                    >
+                      ×
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* ЧИСТАЯ НАВИГАЦИЯ ПО РАЗДЕЛАМ */}
+        <nav className="section-tabs">
+          {[
+            { id: "regression", label: "I. Регрессионный анализ и Спецификации" },
+            { id: "matrices", label: "II. Пошаговые матричные выкладки" },
+            { id: "timeseries", label: "III. Стационарность (ADF) и Коррелограмма" },
+            { id: "markov", label: "IV. Цепи Маркова (Кемени — Снелл)" },
+            { id: "data", label: "V. Таблица данных и Формулы" },
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id as typeof activeTab)}
+              className={`sec-tab ${activeTab === t.id ? "active" : ""}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* ================================================================== */}
+        {/* РАЗДЕЛ I: РЕГРЕССИОННЫЙ АНАЛИЗ И СРАВНЕНИЕ СПЕЦИФИКАЦИЙ             */}
+        {/* ================================================================== */}
+        {activeTab === "regression" && activeModel && (
+          <>
+            {/* Панель постановки задачи */}
+            <div className="paper-sheet">
+              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "flex-start", gap: "16px", marginBottom: "18px" }}>
+                <div>
+                  <h2 className="sheet-heading">Постановка линейной регрессионной модели</h2>
+                  <p className="sheet-desc" style={{ marginBottom: 0 }}>
+                    Выберите объясняемую переменную <i>Y</i> и множество регрессоров <i>X</i>
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
+                  <label style={{ fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <input
+                      type="checkbox"
+                      checked={includeConst}
+                      onChange={(e) => setIncludeConst(e.target.checked)}
+                    />
+                    Свободный член (<i>β</i><sub>0</sub>)
+                  </label>
+                  <label style={{ fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <input
+                      type="checkbox"
+                      checked={useHC3}
+                      onChange={(e) => setUseHC3(e.target.checked)}
+                    />
+                    Робастные ошибки Уайта (HC<sub>3</sub>)
+                  </label>
+                  <button onClick={handleRunOLS} className="ui-btn ui-btn-primary">
+                    Оценить методом наименьших квадратов
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: "24px", alignItems: "start" }}>
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginBottom: "6px" }}>
+                    Зависимая переменная (<i>Y</i>):
+                  </div>
+                  <select
+                    value={depVar}
+                    onChange={(e) => setDepVar(e.target.value)}
+                    className="ui-select"
+                    style={{ width: "100%", fontWeight: 600 }}
+                  >
+                    {varNames.map((v) => (
+                      <option key={v} value={v}>
+                        {v} — {descriptions[v] || ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginBottom: "6px" }}>
+                    Регрессоры (<i>X</i>):
+                  </div>
+                  <div className="var-pills-wrap">
+                    {varNames
+                      .filter((v) => v !== depVar)
+                      .map((v) => {
+                        const isAct = regressors.includes(v);
+                        return (
+                          <button
+                            key={v}
+                            onClick={() =>
+                              setRegressors((prev) =>
+                                prev.includes(v)
+                                  ? prev.filter((x) => x !== v)
+                                  : [...prev, v]
+                              )
+                            }
+                            className={`var-pill ${isAct ? "active" : ""}`}
+                          >
+                            {isAct ? "✓ " : "+ "}
+                            {v}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Протокол оцененной модели в стиле журнальной публикации */}
+            <div className="paper-sheet">
+              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "baseline", gap: "12px" }}>
+                <div>
+                  <h2 className="sheet-heading">
+                    Таблица 1. Оценка параметров модели #{activeModel.id} (зависимая переменная: {activeModel.depVar})
+                  </h2>
+                  <p className="sheet-desc" style={{ marginBottom: 0 }}>
+                    Метод наименьших квадратов, объем выборки <i>T</i> = {activeModel.nObs}, степеней свободы <i>df</i> = {activeModel.dfResid}
+                    {activeModel.useHC3 ? " (робастная ковариационная матрица Уайта HC₃)" : ""}
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <button onClick={() => saveModelSeriesToDf("resid")} className="ui-btn">
+                    Сохранить остатки <i>û</i>
+                  </button>
+                  <button onClick={() => saveModelSeriesToDf("fitted")} className="ui-btn">
+                    Сохранить прогноз <i>Ŷ</i>
+                  </button>
+                  <button onClick={() => copyModelOutput("latex")} className="ui-btn">
+                    {copiedType === "latex" ? <Check size={14} /> : <Copy size={14} />}
+                    Код таблицы LaTeX
+                  </button>
+                </div>
+              </div>
+
+              {/* Аналитическая запись уравнения */}
+              <div className="math-display">
+                <i>Ŷ</i> : &nbsp; {formattedEquation}
+              </div>
+
+              {/* Таблица в стандарте LaTeX booktabs */}
+              <div style={{ overflowX: "auto" }}>
+                <table className="booktabs">
+                  <thead>
+                    <tr>
+                      <th>Фактор (Регрессор)</th>
+                      <th style={{ textAlign: "right" }}>Оценка <i>β̂</i></th>
+                      <th style={{ textAlign: "right" }}>Ст. ошибка <i>SE</i></th>
+                      <th style={{ textAlign: "right" }}><i>t</i>-статистика</th>
+                      <th style={{ textAlign: "right" }}><i>p</i>-value</th>
+                      <th style={{ textAlign: "right" }}>95% Доверительный интервал</th>
+                      <th style={{ textAlign: "right" }}>Ст. коэфф. <i>β*</i></th>
+                      <th style={{ textAlign: "right" }}>Эластичность <i>E</i></th>
+                    </tr>
+                  </thead>
+                  <tbody className="num">
+                    {activeModel.coefficients.map((c) => (
+                      <tr key={c.name}>
+                        <td style={{ fontFamily: "inherit", fontWeight: 600 }}>
+                          {c.name === "const" ? "Константа (β₀)" : c.name}
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>
+                          {c.beta.toFixed(5)}
+                        </td>
+                        <td style={{ textAlign: "right", color: "var(--ink-muted)" }}>
+                          ({c.se.toFixed(5)})
+                        </td>
+                        <td style={{ textAlign: "right" }}>{c.tStat.toFixed(4)}</td>
+                        <td
+                          style={{
+                            textAlign: "right",
+                            fontWeight: c.pValue < 0.05 ? 700 : 400,
+                            color: c.pValue < 0.05 ? "var(--forest)" : "var(--ink-muted)",
+                          }}
+                        >
+                          {c.pValue < 0.0001 ? c.pValue.toExponential(2) : c.pValue.toFixed(4)}{" "}
+                          <span style={{ color: "var(--crimson)" }}>{c.stars}</span>
+                        </td>
+                        <td style={{ textAlign: "right", color: "var(--ink-muted)" }}>
+                          [{c.ciLow.toFixed(4)}; {c.ciHigh.toFixed(4)}]
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {c.stdBeta !== null ? c.stdBeta.toFixed(4) : "—"}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {c.elasticity !== null ? `${c.elasticity.toFixed(3)}%` : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ fontSize: "12px", color: "var(--ink-muted)" }}>
+                Примечание: *** значимость на уровне 1% (<i>p</i> &lt; 0.01), ** на уровне 5% (<i>p</i> &lt; 0.05), * на уровне 10% (<i>p</i> &lt; 0.10). В скобках указаны стандартные ошибки.
+              </div>
+
+              {/* Спокойная сводка ключевых метрик без тяжелых рамок */}
+              <div className="four-metrics">
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--ink-muted)" }}>
+                    Коэффициент детерминации <i>R</i>² (Скорр. <i>R</i>²)
+                  </div>
+                  <div className="num" style={{ fontSize: "18px", fontWeight: 700, marginTop: "4px" }}>
+                    {activeModel.metrics.r2.toFixed(4)}{" "}
+                    <span style={{ fontSize: "14px", fontWeight: 400, color: "var(--ink-muted)" }}>
+                      ({activeModel.metrics.adjR2.toFixed(4)})
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--ink-muted)" }}>
+                    Критерий Фишера <i>F</i>({activeModel.dfModel}, {activeModel.dfResid}) [крит. = {activeModel.metrics.fCrit95.toFixed(2)}]
+                  </div>
+                  <div className="num" style={{ fontSize: "18px", fontWeight: 700, marginTop: "4px" }}>
+                    {activeModel.metrics.fStat.toFixed(2)}{" "}
+                    <span style={{ fontSize: "13px", color: "var(--forest)" }}>
+                      (p = {activeModel.metrics.fPval.toExponential(2)})
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--ink-muted)" }}>
+                    Статистика Дарбина — Уотсона <i>DW</i> / Ст. ошибка <i>SE</i>
+                  </div>
+                  <div className="num" style={{ fontSize: "18px", fontWeight: 700, marginTop: "4px" }}>
+                    {activeModel.metrics.dw.toFixed(4)}{" "}
+                    <span style={{ fontSize: "14px", fontWeight: 400, color: "var(--ink-muted)" }}>
+                      / ±{activeModel.metrics.seReg.toFixed(3)}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--ink-muted)" }}>
+                    Информационные критерии <i>AIC</i> / <i>BIC</i>
+                  </div>
+                  <div className="num" style={{ fontSize: "18px", fontWeight: 700, marginTop: "4px" }}>
+                    {activeModel.metrics.aic.toFixed(2)} / {activeModel.metrics.bic.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Диагностические тесты в единой академической таблице */}
+              <h3 className="serif-math" style={{ fontSize: "16px", margin: "24px 0 8px 0" }}>
+                Таблица 2. Диагностика предпосылок теоремы Гаусса — Маркова
+              </h3>
+              <table className="booktabs">
+                <thead>
+                  <tr>
+                    <th>Диагностический тест</th>
+                    <th>Проверяемая нулевая гипотеза <i>H</i>₀</th>
+                    <th style={{ textAlign: "right" }}>Статистика</th>
+                    <th style={{ textAlign: "right" }}><i>p</i>-value</th>
+                    <th>Заключение (при <i>α</i> = 0.05)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Тест Бреуша — Пагана</td>
+                    <td>Гомоскедастичность остатков (Var(<i>u<sub>t</sub></i>) = σ²)</td>
+                    <td className="num" style={{ textAlign: "right" }}>LM = {activeModel.diagnostics.bpLM.toFixed(4)}</td>
+                    <td className="num" style={{ textAlign: "right" }}>{activeModel.diagnostics.bpPval.toFixed(4)}</td>
+                    <td style={{ color: activeModel.diagnostics.bpPval > 0.05 ? "var(--forest)" : "var(--crimson)" }}>
+                      {activeModel.diagnostics.bpPval > 0.05 ? "Условие выполнено (гомоскедастичность)" : "Гетероскедастичность (включите HC₃)"}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Тест Рамсея (RESET)</td>
+                    <td>Линейная функциональная форма адекватна</td>
+                    <td className="num" style={{ textAlign: "right" }}>F = {activeModel.diagnostics.resetF.toFixed(4)}</td>
+                    <td className="num" style={{ textAlign: "right" }}>{activeModel.diagnostics.resetPval.toFixed(4)}</td>
+                    <td style={{ color: activeModel.diagnostics.resetPval > 0.05 ? "var(--forest)" : "var(--crimson)" }}>
+                      {activeModel.diagnostics.resetPval > 0.05 ? "Спецификация корректна" : "Пропущены нелинейные члены"}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Тест Жарка — Бера</td>
+                    <td>Нормальный закон распределения остатков <i>u<sub>t</sub></i> ~ N(0, σ²)</td>
+                    <td className="num" style={{ textAlign: "right" }}>JB = {activeModel.diagnostics.jbStat.toFixed(4)}</td>
+                    <td className="num" style={{ textAlign: "right" }}>{activeModel.diagnostics.jbPval.toFixed(4)}</td>
+                    <td style={{ color: activeModel.diagnostics.jbPval > 0.05 ? "var(--forest)" : "var(--crimson)" }}>
+                      {activeModel.diagnostics.jbPval > 0.05 ? "Остатки распределены нормально" : "Отклонение от нормальности"}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Факторы инфляции дисперсии (VIF)</td>
+                    <td>Отсутствие мультиколлинеарности (VIF &lt; 10)</td>
+                    <td className="num" style={{ textAlign: "right" }} colSpan={2}>
+                      {activeModel.diagnostics.vif.map((v) => `${v.name}: ${v.value.toFixed(2)}`).join(" | ")}
+                    </td>
+                    <td style={{ color: "var(--forest)" }}>
+                      {activeModel.diagnostics.vif.every((v) => v.value < 10)
+                        ? "Мультиколлинеарность отсутствует"
+                        : "Высокая коллинеарность регрессоров"}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {/* Графики на чистом листе */}
+              <div className="two-columns" style={{ marginTop: "28px" }}>
+                <div>
+                  <h4 className="serif-math" style={{ margin: "0 0 10px 0", fontSize: "15px" }}>
+                    Рис. 1. Фактическая траектория ({activeModel.depVar}) и аппроксимация МНК (<i>Ŷ<sub>t</sub></i>)
+                  </h4>
+                  <div style={{ height: "270px" }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={activeModel.seriesData}>
+                        <CartesianGrid strokeDasharray="2 2" stroke={chartColors.grid} />
+                        <XAxis dataKey="t" stroke={chartColors.axis} fontSize={11} />
+                        <YAxis stroke={chartColors.axis} fontSize={11} />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: chartColors.tooltipBg,
+                            borderColor: chartColors.tooltipBorder,
+                            fontSize: "12px",
+                          }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: "12px" }} />
+                        <Line
+                          type="monotone"
+                          dataKey="actual"
+                          name={`Факт (${activeModel.depVar})`}
+                          stroke={chartColors.actual}
+                          strokeWidth={2}
+                          dot={{ r: 2 }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="fitted"
+                          name="Модель МНК (Ŷ)"
+                          stroke={chartColors.fitted}
+                          strokeWidth={2}
+                          strokeDasharray="5 4"
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="serif-math" style={{ margin: "0 0 10px 0", fontSize: "15px" }}>
+                    Рис. 2. Квантиль-квантильный график нормальности остатков (Normal Q-Q Plot)
+                  </h4>
+                  <div style={{ height: "270px" }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ScatterChart>
+                        <CartesianGrid strokeDasharray="2 2" stroke={chartColors.grid} />
+                        <XAxis
+                          type="number"
+                          dataKey="theo"
+                          name="Теор. квантиль N(0,1)"
+                          stroke={chartColors.axis}
+                          fontSize={11}
+                          domain={[-2.5, 2.5]}
+                        />
+                        <YAxis
+                          type="number"
+                          dataKey="emp"
+                          name="Стандартиз. остаток"
+                          stroke={chartColors.axis}
+                          fontSize={11}
+                          domain={[-2.5, 2.5]}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: chartColors.tooltipBg,
+                            borderColor: chartColors.tooltipBorder,
+                            fontSize: "12px",
+                          }}
+                        />
+                        <ReferenceLine
+                          segment={[
+                            { x: -2.4, y: -2.4 },
+                            { x: 2.4, y: 2.4 },
+                          ]}
+                          stroke={chartColors.fitted}
+                          strokeDasharray="4 4"
+                        />
+                        <Scatter name="Квантили остатков" data={activeModel.qqData} fill={chartColors.actual} />
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Автоматическое сравнение функциональных форм */}
+            <div className="paper-sheet">
+              <h2 className="sheet-heading">
+                Таблица 3. Сравнение альтернативных функциональных спецификаций (Бокса — Кокса)
+              </h2>
+              <p className="sheet-desc">
+                Для моделей с логарифмированной зависимой переменной <i>ln</i>(<i>Y</i>) критерий Акаике скорректирован на якобиан преобразования (<i>AIC</i><sub>adj</sub> = <i>AIC</i><sub>lnY</sub> + 2·Σ<i>ln</i>(<i>Y<sub>t</sub></i>)) для строгой сопоставимости с линейной моделью
+              </p>
+              <div style={{ overflowX: "auto" }}>
+                <table className="booktabs">
+                  <thead>
+                    <tr>
+                      <th>Спецификация модели</th>
+                      <th>Аналитическая форма</th>
+                      <th style={{ textAlign: "right" }}><i>R</i>²</th>
+                      <th style={{ textAlign: "right" }}>Скорр. <i>R</i>²</th>
+                      <th style={{ textAlign: "right" }}>Сопоставимый <i>AIC</i></th>
+                      <th style={{ textAlign: "right" }}><i>F</i>-стат.</th>
+                      <th style={{ textAlign: "right" }}>RESET (<i>p</i>)</th>
+                      <th>Интерпретация коэффициентов</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {specComparisons.map((sp, idx) => {
+                      const bestAic = Math.min(...specComparisons.map((s) => s.aicComparable));
+                      const isBest = Math.abs(sp.aicComparable - bestAic) < 1e-4;
+                      return (
+                        <tr key={idx}>
+                          <td style={{ fontWeight: isBest ? 700 : 500, color: isBest ? "var(--forest)" : "var(--ink)" }}>
+                            {isBest ? "★ " : ""}
+                            {sp.formName}
+                          </td>
+                          <td className="serif-math">{sp.formulaStr}</td>
+                          <td className="num" style={{ textAlign: "right" }}>{sp.r2Native.toFixed(4)}</td>
+                          <td className="num" style={{ textAlign: "right" }}>{sp.adjR2Native.toFixed(4)}</td>
+                          <td className="num" style={{ textAlign: "right", fontWeight: isBest ? 700 : 400 }}>
+                            {sp.aicComparable.toFixed(2)}
+                          </td>
+                          <td className="num" style={{ textAlign: "right" }}>{sp.fStat.toFixed(2)}</td>
+                          <td className="num" style={{ textAlign: "right" }}>{sp.resetPval.toFixed(4)}</td>
+                          <td style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>{sp.note}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ================================================================== */}
+        {/* РАЗДЕЛ II: ПОШАГОВЫЕ МАТРИЧНЫЕ ВЫКЛАДКИ                             */}
+        {/* ================================================================== */}
+        {activeTab === "matrices" && activeModel && (
+          <div className="paper-sheet">
+            <h2 className="sheet-heading">
+              Матричное разложение метода наименьших квадратов: β̂ = (X&apos;X)⁻¹ · X&apos;Y
+            </h2>
+            <p className="sheet-desc">
+              Промежуточные матрицы системы нормальных уравнений Гаусса для Модели #{activeModel.id} (размерность матрицы плана <i>X</i>: {activeModel.nObs} × {activeModel.colNames.length})
+            </p>
+
+            <h3 className="serif-math" style={{ fontSize: "16px", marginTop: "20px" }}>
+              1. Матрица Грамма (X&apos;X) и вектор правой части (X&apos;Y)
+            </h3>
+            <div style={{ overflowX: "auto" }}>
+              <table className="booktabs num">
+                <thead>
+                  <tr>
+                    <th>Строка \ Столбец</th>
+                    {activeModel.colNames.map((c) => (
+                      <th key={c} style={{ textAlign: "right" }}>{c}</th>
+                    ))}
+                    <th style={{ textAlign: "right" }}>Вектор X&apos;Y</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeModel.matrices.XTX.map((row, rIdx) => (
+                    <tr key={rIdx}>
+                      <td style={{ fontWeight: 600 }}>{activeModel.colNames[rIdx]}</td>
+                      {row.map((val, cIdx) => (
+                        <td key={cIdx} style={{ textAlign: "right" }}>{val.toFixed(2)}</td>
+                      ))}
+                      <td style={{ textAlign: "right", fontWeight: 700 }}>
+                        {activeModel.matrices.XTY[rIdx].toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="two-columns" style={{ marginTop: "24px" }}>
+              <div style={{ overflowX: "auto" }}>
+                <h3 className="serif-math" style={{ fontSize: "16px" }}>
+                  2. Обратная матрица (X&apos;X)⁻¹
+                </h3>
+                <table className="booktabs num">
+                  <thead>
+                    <tr>
+                      <th>(X&apos;X)⁻¹</th>
+                      {activeModel.colNames.map((c) => (
+                        <th key={c} style={{ textAlign: "right" }}>{c}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeModel.matrices.XTX_inv.map((row, rIdx) => (
+                      <tr key={rIdx}>
+                        <td style={{ fontWeight: 600 }}>{activeModel.colNames[rIdx]}</td>
+                        {row.map((val, cIdx) => (
+                          <td key={cIdx} style={{ textAlign: "right" }}>{val.toExponential(3)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ overflowX: "auto" }}>
+                <h3 className="serif-math" style={{ fontSize: "16px" }}>
+                  3. Ковариационная матрица оценок Cov(β̂)
+                </h3>
+                <table className="booktabs num">
+                  <thead>
+                    <tr>
+                      <th>Cov(β̂)</th>
+                      {activeModel.colNames.map((c) => (
+                        <th key={c} style={{ textAlign: "right" }}>{c}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeModel.matrices.covBeta.map((row, rIdx) => (
+                      <tr key={rIdx}>
+                        <td style={{ fontWeight: 600 }}>{activeModel.colNames[rIdx]}</td>
+                        {row.map((val, cIdx) => (
+                          <td
+                            key={cIdx}
+                            style={{
+                              textAlign: "right",
+                              fontWeight: rIdx === cIdx ? 700 : 400,
+                              color: rIdx === cIdx ? "var(--forest)" : "var(--ink)",
+                            }}
+                          >
+                            {val.toExponential(3)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <h3 className="serif-math" style={{ fontSize: "16px", marginTop: "24px" }}>
+              4. Диагностика влиятельных наблюдений (Рычаги проекционной матрицы <i>h<sub>ii</sub></i> и расстояние Кука <i>D<sub>i</sub></i>)
+            </h3>
+            <table className="booktabs num">
+              <thead>
+                <tr>
+                  <th>Наблюдение (<i>t</i>)</th>
+                  <th style={{ textAlign: "right" }}>Факт (<i>Y<sub>t</sub></i>)</th>
+                  <th style={{ textAlign: "right" }}>Остаток (<i>e<sub>t</sub></i>)</th>
+                  <th style={{ textAlign: "right" }}>Рычаг <i>h<sub>ii</sub></i></th>
+                  <th style={{ textAlign: "right" }}>Расстояние Кука <i>D<sub>i</sub></i></th>
+                  <th>Оценка влияния (порог 4/<i>T</i> = {(4 / activeModel.nObs).toFixed(4)})</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeModel.diagnostics.topInfluential.map((pt) => {
+                  const high = pt.cooksD > 4 / activeModel.nObs;
+                  return (
+                    <tr key={pt.t}>
+                      <td style={{ fontWeight: 600 }}>t = {pt.t}</td>
+                      <td style={{ textAlign: "right" }}>{pt.actual.toFixed(4)}</td>
+                      <td style={{ textAlign: "right" }}>{pt.resid.toFixed(4)}</td>
+                      <td style={{ textAlign: "right" }}>{pt.leverage.toFixed(4)}</td>
+                      <td style={{ textAlign: "right", fontWeight: 700 }}>{pt.cooksD.toFixed(4)}</td>
+                      <td style={{ fontFamily: "sans-serif", color: high ? "var(--crimson)" : "var(--forest)" }}>
+                        {high ? "Влиятельный выброс (D_i > 4/T)" : "В пределах нормы"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ================================================================== */}
+        {/* РАЗДЕЛ III: СТАЦИОНАРНОСТЬ, АКФ/ЧАКФ И ОПИСАТЕЛЬНАЯ СТАТИСТИКА      */}
+        {/* ================================================================== */}
+        {activeTab === "timeseries" && (
+          <>
+            <div className="paper-sheet">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+                <div>
+                  <h2 className="sheet-heading">
+                    Анализ временного ряда: тест Дики — Фуллера (ADF) и Коррелограмма
+                  </h2>
+                  <p className="sheet-desc" style={{ marginBottom: 0 }}>
+                    Проверка на наличие единичного корня и автокорреляционная структура (критерий Льюнга — Бокса <i>Q</i> = {correlogramResult.qStat}, <i>p</i> = {correlogramResult.qPval})
+                  </p>
+                </div>
+                <select
+                  value={tsVar}
+                  onChange={(e) => setTsVar(e.target.value)}
+                  className="ui-select"
+                >
+                  {varNames.map((v) => (
+                    <option key={v} value={v}>Исследуемый ряд: {v}</option>
+                  ))}
+                </select>
+              </div>
+
+              <table className="booktabs" style={{ marginTop: "18px" }}>
+                <thead>
+                  <tr>
+                    <th>Спецификация уравнения Дики — Фуллера</th>
+                    <th style={{ textAlign: "right" }}>Расчетная <i>τ</i>-статистика</th>
+                    <th style={{ textAlign: "right" }}>Критическое значение (5%)</th>
+                    <th style={{ textAlign: "right" }}>Критическое значение (1%)</th>
+                    <th>Заключение о стационарности ряда</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>С константой (<i>ΔY<sub>t</sub> = α + γY<sub>t−1</sub> + ε<sub>t</sub></i>)</td>
+                    <td className="num" style={{ textAlign: "right", fontWeight: 700 }}>{adfResult.constModel.tau.toFixed(4)}</td>
+                    <td className="num" style={{ textAlign: "right" }}>{adfResult.constModel.crit5}</td>
+                    <td className="num" style={{ textAlign: "right" }}>{adfResult.constModel.crit1}</td>
+                    <td style={{ color: adfResult.constModel.stationary ? "var(--forest)" : "var(--crimson)" }}>
+                      {adfResult.constModel.stationary ? "Ряд стационарен I(0)" : "Ряд нестационарен (единичный корень)"}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>С константой и трендом (<i>ΔY<sub>t</sub> = α + βt + γY<sub>t−1</sub> + ε<sub>t</sub></i>)</td>
+                    <td className="num" style={{ textAlign: "right", fontWeight: 700 }}>{adfResult.trendModel.tau.toFixed(4)}</td>
+                    <td className="num" style={{ textAlign: "right" }}>{adfResult.trendModel.crit5}</td>
+                    <td className="num" style={{ textAlign: "right" }}>{adfResult.trendModel.crit1}</td>
+                    <td style={{ color: adfResult.trendModel.stationary ? "var(--forest)" : "var(--crimson)" }}>
+                      {adfResult.trendModel.stationary ? "Стационарен относительно тренда" : "Нестационарен (требуется взятие разности ΔX)"}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div className="two-columns" style={{ marginTop: "24px" }}>
+                <div>
+                  <h4 className="serif-math" style={{ margin: "0 0 10px 0", fontSize: "15px" }}>
+                    Рис. 3. Автокорреляционная (ACF) и частная автокорреляционная (PACF) функции
+                  </h4>
+                  <div style={{ height: "260px" }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={correlogramResult.lags}>
+                        <CartesianGrid strokeDasharray="2 2" stroke={chartColors.grid} />
+                        <XAxis dataKey="lag" stroke={chartColors.axis} fontSize={11} />
+                        <YAxis stroke={chartColors.axis} fontSize={11} domain={[-1, 1]} />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: chartColors.tooltipBg,
+                            borderColor: chartColors.tooltipBorder,
+                            fontSize: "12px",
+                          }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: "12px" }} />
+                        <ReferenceLine y={correlogramResult.bartlettBand} stroke={chartColors.fitted} strokeDasharray="3 3" />
+                        <ReferenceLine y={-correlogramResult.bartlettBand} stroke={chartColors.fitted} strokeDasharray="3 3" />
+                        <ReferenceLine y={0} stroke={chartColors.axis} />
+                        <Bar dataKey="acf" name="АКФ (ACF)" fill={chartColors.actual} />
+                        <Bar dataKey="pacf" name="ЧАКФ (PACF)" fill={chartColors.fitted} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="serif-math" style={{ margin: "0 0 10px 0", fontSize: "15px" }}>
+                    Матрица парных корреляций Пирсона
+                  </h4>
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="booktabs num">
+                      <thead>
+                        <tr>
+                          <th>Переменная</th>
+                          {varNames.slice(0, 6).map((v) => (
+                            <th key={v} style={{ textAlign: "right" }}>{v}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {varNames.slice(0, 6).map((rVar) => (
+                          <tr key={rVar}>
+                            <td style={{ fontWeight: 600 }}>{rVar}</td>
+                            {varNames.slice(0, 6).map((cVar) => {
+                              const r = pearsonCorr(df[rVar], df[cVar]);
+                              const strong = Math.abs(r) > 0.65 && rVar !== cVar;
+                              return (
+                                <td
+                                  key={cVar}
+                                  style={{
+                                    textAlign: "right",
+                                    fontWeight: strong ? 700 : 400,
+                                    color: strong ? "var(--crimson)" : "var(--ink)",
+                                  }}
+                                >
+                                  {r.toFixed(3)}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="paper-sheet">
+              <h2 className="sheet-heading">Сводная таблица описательных статистик выборки</h2>
+              <div style={{ overflowX: "auto" }}>
+                <table className="booktabs num">
+                  <thead>
+                    <tr>
+                      <th>Переменная</th>
+                      <th style={{ textAlign: "right" }}>Среднее</th>
+                      <th style={{ textAlign: "right" }}>Медиана</th>
+                      <th style={{ textAlign: "right" }}>Ст. откл. (<i>σ</i>)</th>
+                      <th style={{ textAlign: "right" }}>Минимум</th>
+                      <th style={{ textAlign: "right" }}>Максимум</th>
+                      <th style={{ textAlign: "right" }}>Коэф. вариации (<i>CV</i>%)</th>
+                      <th style={{ textAlign: "right" }}>Асимметрия</th>
+                      <th style={{ textAlign: "right" }}><i>N</i></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {varStats.map((s) => (
+                      <tr key={s.name}>
+                        <td style={{ fontWeight: 600 }}>{s.name}</td>
+                        <td style={{ textAlign: "right" }}>{s.mean.toFixed(4)}</td>
+                        <td style={{ textAlign: "right" }}>{s.median.toFixed(4)}</td>
+                        <td style={{ textAlign: "right" }}>{s.std.toFixed(4)}</td>
+                        <td style={{ textAlign: "right" }}>{s.min.toFixed(4)}</td>
+                        <td style={{ textAlign: "right" }}>{s.max.toFixed(4)}</td>
+                        <td style={{ textAlign: "right" }}>{s.cv.toFixed(2)}%</td>
+                        <td style={{ textAlign: "right" }}>{s.skew.toFixed(4)}</td>
+                        <td style={{ textAlign: "right" }}>{s.n}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ================================================================== */}
+        {/* РАЗДЕЛ IV: ЦЕПИ МАРКОВА И ФУНДАМЕНТАЛЬНАЯ МАТРИЦА КЕМЕНИ — СНЕЛЛА    */}
+        {/* ================================================================== */}
+        {activeTab === "markov" && (
+          <div className="paper-sheet">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "18px" }}>
+              <div>
+                <h2 className="sheet-heading">
+                  Стохастическое моделирование цепями Маркова (Фундаментальный анализ Кемени — Снелла)
+                </h2>
+                <p className="sheet-desc" style={{ marginBottom: 0 }}>
+                  Текущее состояние: <strong>{markovResult.currentState}</strong> | Второе собственное значение |<i>λ</i>₂| = {markovResult.lambda2Mod.toFixed(4)} | Время перемешивания <i>τ</i><sub>mix</sub> ≈ {markovResult.mixingTime.toFixed(2)} пер.
+                </p>
+              </div>
+              <select
+                value={markovVar}
+                onChange={(e) => setMarkovVar(e.target.value)}
+                className="ui-select"
+              >
+                {varNames.map((v) => (
+                  <option key={v} value={v}>Показатель: {v}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="two-columns">
+              <div>
+                <h3 className="serif-math" style={{ fontSize: "16px" }}>
+                  1. Матрица переходных вероятностей <i>P<sub>ij</sub></i> и вектор <i>π</i>
+                </h3>
+                <table className="booktabs num">
+                  <thead>
+                    <tr>
+                      <th>Состояние (<i>t</i>) \ (<i>t</i>+1)</th>
+                      {markovResult.shortLabels.map((l) => (
+                        <th key={l} style={{ textAlign: "right" }}>{l}</th>
+                      ))}
+                      <th style={{ textAlign: "right" }}>Финальное <i>π<sub>i</sub></i></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {markovResult.P.map((row, i) => (
+                      <tr key={i}>
+                        <td>
+                          <strong>{markovResult.shortLabels[i]}</strong>
+                          <div style={{ fontSize: "11px", color: "var(--ink-muted)" }}>
+                            {markovResult.bounds[i]}
+                          </div>
+                        </td>
+                        {row.map((prob, j) => (
+                          <td key={j} style={{ textAlign: "right" }}>
+                            <div>{prob.toFixed(4)}</div>
+                            <div style={{ fontSize: "11px", color: "var(--ink-muted)" }}>
+                              (n={markovResult.counts[i][j]})
+                            </div>
+                          </td>
+                        ))}
+                        <td style={{ textAlign: "right", fontWeight: 700, color: "var(--forest)" }}>
+                          {(markovResult.stationary[i] * 100).toFixed(2)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <h3 className="serif-math" style={{ fontSize: "16px", marginTop: "24px" }}>
+                  2. Матрица среднего времени первого достижения <i>M<sub>ij</sub></i> (в периодах)
+                </h3>
+                <table className="booktabs num">
+                  <thead>
+                    <tr>
+                      <th>Из фазы \ В фазу</th>
+                      {markovResult.shortLabels.map((l) => (
+                        <th key={l} style={{ textAlign: "right" }}>{l}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {markovResult.M.map((row, i) => (
+                      <tr key={i}>
+                        <td style={{ fontWeight: 600 }}>{markovResult.shortLabels[i]}</td>
+                        {row.map((val, j) => (
+                          <td key={j} style={{ textAlign: "right", fontWeight: i === j ? 700 : 400 }}>
+                            {val.toFixed(2)} пер.
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                <h3 className="serif-math" style={{ fontSize: "16px" }}>
+                  3. Прогноз распределения вероятностей состояний <i>S<sub>t</sub> = S₀ · P<sup>t</sup></i>
+                </h3>
+                <div style={{ height: "310px", marginTop: "14px" }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={markovResult.forecast}>
+                      <CartesianGrid strokeDasharray="2 2" stroke={chartColors.grid} />
+                      <XAxis dataKey="step" stroke={chartColors.axis} fontSize={12} />
+                      <YAxis stroke={chartColors.axis} fontSize={12} unit="%" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: chartColors.tooltipBg,
+                          borderColor: chartColors.tooltipBorder,
+                          fontSize: "12px",
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: "12px" }} />
+                      <Bar dataKey="S1" name="S₁ (Спад)" fill={chartColors.fitted} />
+                      <Bar dataKey="S2" name="S₂ (Стагнация)" fill={chartColors.actual} />
+                      <Bar dataKey="S3" name="S₃ (Рост)" fill={chartColors.accent} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================================================================== */}
+        {/* РАЗДЕЛ V: ТАБЛИЦА ДАННЫХ И ГЕНЕРАТОР ФОРМУЛ                         */}
+        {/* ================================================================== */}
+        {activeTab === "data" && (
+          <div className="paper-sheet">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
+              <div>
+                <h2 className="sheet-heading">Матрица исходных данных и редактор формул</h2>
+                <p className="sheet-desc" style={{ marginBottom: 0 }}>
+                  Любую ячейку таблицы можно изменить вручную (кликните по числу) или создать новый столбец по формуле
+                </p>
+              </div>
+              <button onClick={addObservationRow} className="ui-btn">
+                <Plus size={14} /> Добавить строку (t = {nRows + 1})
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleCreateByFormula}
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "10px",
+                padding: "14px",
+                background: "var(--bg-subtle)",
+                marginBottom: "20px",
+                alignItems: "center",
+              }}
+            >
+              <input
+                type="text"
+                value={newColName}
+                onChange={(e) => setNewColName(e.target.value)}
+                placeholder="Имя новой переменной (напр. RealRate)"
+                className="ui-select num"
+                style={{ minWidth: "220px" }}
+              />
+              <input
+                type="text"
+                value={newColFormula}
+                onChange={(e) => setNewColFormula(e.target.value)}
+                placeholder="Формула: KeyRate - Inflation  или  ln(Investment) * 2"
+                className="ui-select num"
+                style={{ flex: 1, minWidth: "280px" }}
+              />
+              <button type="submit" className="ui-btn ui-btn-primary">
+                Вычислить столбец
+              </button>
+            </form>
+
+            <div style={{ overflowX: "auto", maxHeight: "540px" }}>
+              <table className="booktabs num">
+                <thead>
+                  <tr>
+                    <th style={{ width: "60px" }}><i>t</i></th>
+                    {varNames.map((v) => (
+                      <th key={v} style={{ textAlign: "right" }}>{v}</th>
+                    ))}
+                    <th style={{ width: "50px", textAlign: "center" }}>Удал.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: nRows }, (_, rowIdx) => (
+                    <tr key={rowIdx}>
+                      <td style={{ color: "var(--ink-muted)" }}>{rowIdx + 1}</td>
+                      {varNames.map((v) => {
+                        const cellVal = df[v][rowIdx];
+                        return (
+                          <td key={v} style={{ padding: "4px 6px", textAlign: "right" }}>
+                            <input
+                              type="text"
+                              defaultValue={
+                                cellVal !== null && cellVal !== undefined ? String(cellVal) : ""
+                              }
+                              onBlur={(e) => handleCellEdit(v, rowIdx, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                              }}
+                              className="cell-edit"
+                            />
+                          </td>
+                        );
+                      })}
+                      <td style={{ textAlign: "center" }}>
+                        <button
+                          onClick={() => deleteObservationRow(rowIdx)}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* МОДАЛЬНОЕ ОКНО ВСТАВКИ ИЗ EXCEL */}
       {showPasteModal && (
@@ -2095,7 +2957,7 @@ export default function TedWorkbench() {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.75)",
+            background: "rgba(0,0,0,0.6)",
             zIndex: 50,
             display: "flex",
             alignItems: "center",
@@ -2103,1328 +2965,30 @@ export default function TedWorkbench() {
             padding: "20px",
           }}
         >
-          <div className="panel" style={{ width: "100%", maxWidth: "640px" }}>
-            <div className="panel-head">
-              <h3 className="panel-title">Вставка таблицы из Excel / Google Таблиц</h3>
-              <button onClick={() => setShowPasteModal(false)} className="btn btn-sm">
-                Закрыть
+          <div className="paper-sheet" style={{ width: "100%", maxWidth: "620px", margin: 0 }}>
+            <h3 className="sheet-heading">Вставка диапазона из Excel</h3>
+            <p className="sheet-desc">
+              Скопируйте столбцы в Excel вместе с заголовками (`Ctrl+C`) и вставьте ниже (`Ctrl+V`):
+            </p>
+            <textarea
+              rows={9}
+              value={pasteBuffer}
+              onChange={(e) => setPasteBuffer(e.target.value)}
+              placeholder={"GDP_Growth\tInvestment\tKeyRate\n4.2\t21.5\t7.5\n3.8\t20.1\t8.0"}
+              className="ui-select num"
+              style={{ width: "100%", marginBottom: "14px" }}
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+              <button onClick={() => setShowPasteModal(false)} className="ui-btn">
+                Отмена
               </button>
-            </div>
-            <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <p style={{ margin: 0, color: "#a1a1aa", fontSize: "12px" }}>
-                Скопируйте ячейки в Excel вместе с заголовками (`Ctrl+C`) и вставьте ниже (`Ctrl+V`):
-              </p>
-              <textarea
-                rows={10}
-                value={pasteBuffer}
-                onChange={(e) => setPasteBuffer(e.target.value)}
-                placeholder={"GDP_Growth\tInvestment\tKeyRate\n4.2\t21.5\t7.5\n3.8\t20.1\t8.0"}
-                className="input-field mono"
-                style={{ width: "100%", resize: "vertical" }}
-              />
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                <button onClick={() => setShowPasteModal(false)} className="btn">
-                  Отмена
-                </button>
-                <button onClick={handlePasteFromExcel} className="btn btn-amber">
-                  Загрузить данные
-                </button>
-              </div>
+              <button onClick={handlePasteFromExcel} className="ui-btn ui-btn-primary">
+                Импортировать
+              </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* ОСНОВНОЙ РАБОЧИЙ ЭКРАН */}
-      <div className="main-layout">
-        {/* ЛЕВАЯ КОЛОНКА: РЕЕСТР ПЕРЕМЕННЫХ */}
-        <aside className="var-sidebar">
-          <div className="sidebar-header">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-              <span style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: "#a1a1aa", letterSpacing: "0.05em" }}>
-                Реестр переменных ({varNames.length})
-              </span>
-              <span className="mono" style={{ fontSize: "11px", color: "#d97706" }}>
-                Выбрано: {selectedVars.length}
-              </span>
-            </div>
-
-            <div style={{ position: "relative", marginBottom: "8px" }}>
-              <Search
-                size={13}
-                color="#71717a"
-                style={{ position: "absolute", left: "9px", top: "8px" }}
-              />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Фильтр по имени..."
-                className="search-input"
-              />
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "4px" }}>
-              <button
-                onClick={() => applyTransformation("log")}
-                title="Натуральный логарифм ln(X)"
-                className="btn btn-sm mono"
-                style={{ justifyContent: "center" }}
-              >
-                ln(X)
-              </button>
-              <button
-                onClick={() => applyTransformation("diff")}
-                title="Первая разность ΔX"
-                className="btn btn-sm mono"
-                style={{ justifyContent: "center" }}
-              >
-                ΔX
-              </button>
-              <button
-                onClick={() => applyTransformation("lag1")}
-                title="Лаг 1-го порядка X(t-1)"
-                className="btn btn-sm mono"
-                style={{ justifyContent: "center" }}
-              >
-                X(t-1)
-              </button>
-              <button
-                onClick={() => applyTransformation("pch")}
-                title="Цепной темп прироста (%)"
-                className="btn btn-sm mono"
-                style={{ justifyContent: "center" }}
-              >
-                %ΔX
-              </button>
-            </div>
-          </div>
-
-          <div className="var-scroll-list">
-            {filteredVars.map((v) => {
-              const isSelected = selectedVars.includes(v.name);
-              return (
-                <div
-                  key={v.name}
-                  onClick={() => toggleSelectVar(v.name)}
-                  className={`var-row ${isSelected ? "selected" : ""}`}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      readOnly
-                      style={{ accentColor: "#d97706", cursor: "pointer", margin: 0 }}
-                    />
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        <span className="mono" style={{ fontSize: "11px", color: "#71717a" }}>
-                          #{v.id}
-                        </span>
-                        <span
-                          className="mono"
-                          style={{
-                            fontWeight: 700,
-                            fontSize: "12.5px",
-                            color: "#f4f4f5",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {v.name}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "11px",
-                          color: "#71717a",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {v.desc}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
-                    <div className="mono" style={{ textAlign: "right", fontSize: "11px" }}>
-                      <div style={{ color: "#d4d4d8" }}>μ={v.mean.toFixed(2)}</div>
-                      <div style={{ color: "#71717a" }}>σ={v.std.toFixed(2)}</div>
-                    </div>
-                    <button
-                      onClick={(e) => deleteVariable(v.name, e)}
-                      title="Удалить переменную"
-                      className="del-btn"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </aside>
-
-        {/* ПРАВАЯ ОСНОВНАЯ РАБОЧАЯ ОБЛАСТЬ */}
-        <main className="content-pane">
-          {/* ВКЛАДКИ */}
-          <div className="nav-tabs">
-            <button
-              onClick={() => setActiveTab("data")}
-              className={`nav-tab ${activeTab === "data" ? "active" : ""}`}
-            >
-              <TableIcon size={14} />
-              1. Таблица данных
-            </button>
-            <button
-              onClick={() => setActiveTab("ols")}
-              className={`nav-tab ${activeTab === "ols" ? "active" : ""}`}
-            >
-              <Sliders size={14} />
-              2. МНК-регрессия и Q-Q Plot
-            </button>
-            <button
-              onClick={() => setActiveTab("steps")}
-              className={`nav-tab ${activeTab === "steps" ? "active" : ""}`}
-            >
-              <Sigma size={14} />
-              3. Пошаговые матричные выкладки
-            </button>
-            <button
-              onClick={() => setActiveTab("specs")}
-              className={`nav-tab ${activeTab === "specs" ? "active" : ""}`}
-            >
-              <Layers size={14} />
-              4. Автоподбор формы (Кобб — Дуглас)
-            </button>
-            <button
-              onClick={() => setActiveTab("stats")}
-              className={`nav-tab ${activeTab === "stats" ? "active" : ""}`}
-            >
-              <BarChart2 size={14} />
-              5. АКФ/ЧАКФ и Стационарность
-            </button>
-            <button
-              onClick={() => setActiveTab("markov")}
-              className={`nav-tab ${activeTab === "markov" ? "active" : ""}`}
-            >
-              <Activity size={14} />
-              6. Цепи Маркова (Кемени — Снелл)
-            </button>
-          </div>
-
-          <div className="workspace-scroll">
-            {/* ============================================================== */}
-            {/* ВКЛАДКА 1: РЕДАКТОР ДАННЫХ И ФОРМУЛ                             */}
-            {/* ============================================================== */}
-            {activeTab === "data" && (
-              <>
-                <div className="panel">
-                  <div className="panel-head">
-                    <h2 className="panel-title">
-                      <Calculator size={14} style={{ verticalAlign: "middle", marginRight: "6px" }} />
-                      Генератор переменных и формул
-                    </h2>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button onClick={addObservationRow} className="btn btn-sm">
-                        <Plus size={13} /> Добавить строку (t = {nRows + 1})
-                      </button>
-                      <button onClick={() => setShowPasteModal(true)} className="btn btn-sm">
-                        Вставить из Excel
-                      </button>
-                    </div>
-                  </div>
-                  <div className="panel-body">
-                    <form
-                      onSubmit={handleCreateByFormula}
-                      style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}
-                    >
-                      <div style={{ flex: "1 1 180px" }}>
-                        <label style={{ display: "block", fontSize: "11px", color: "#a1a1aa", marginBottom: "4px" }}>
-                          Имя нового столбца:
-                        </label>
-                        <input
-                          type="text"
-                          value={newColName}
-                          onChange={(e) => setNewColName(e.target.value)}
-                          placeholder="Напр.: RealRate"
-                          className="input-field mono"
-                          style={{ width: "100%" }}
-                        />
-                      </div>
-                      <div style={{ flex: "2 1 340px" }}>
-                        <label style={{ display: "block", fontSize: "11px", color: "#a1a1aa", marginBottom: "4px" }}>
-                          Математическая формула (оставьте пустым для заполнения вручную):
-                        </label>
-                        <input
-                          type="text"
-                          value={newColFormula}
-                          onChange={(e) => setNewColFormula(e.target.value)}
-                          placeholder="Напр.: KeyRate - Inflation  или  ln(Investment) * 2"
-                          className="input-field mono"
-                          style={{ width: "100%" }}
-                        />
-                      </div>
-                      <button type="submit" className="btn btn-amber">
-                        <Plus size={14} /> Создать столбец
-                      </button>
-                    </form>
-                  </div>
-                </div>
-
-                <div className="panel" style={{ overflow: "hidden" }}>
-                  <div className="panel-head">
-                    <span className="panel-title">
-                      Матрица наблюдений (кликните по ячейке для редактирования)
-                    </span>
-                    <span className="mono" style={{ fontSize: "11px", color: "#a1a1aa" }}>
-                      Размерность: {nRows} × {varNames.length}
-                    </span>
-                  </div>
-                  <div style={{ overflowX: "auto", maxHeight: "520px" }}>
-                    <table className="data-table">
-                      <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
-                        <tr>
-                          <th style={{ width: "60px" }}>t</th>
-                          {varNames.map((v) => (
-                            <th key={v} className="mono" style={{ textAlign: "right" }}>
-                              {v}
-                            </th>
-                          ))}
-                          <th style={{ width: "44px", textAlign: "center" }}>Удал.</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Array.from({ length: nRows }, (_, rowIdx) => (
-                          <tr key={rowIdx}>
-                            <td className="mono" style={{ color: "#71717a" }}>
-                              {rowIdx + 1}
-                            </td>
-                            {varNames.map((v) => {
-                              const cellVal = df[v][rowIdx];
-                              return (
-                                <td key={v} style={{ padding: "3px 6px", textAlign: "right" }}>
-                                  <input
-                                    type="text"
-                                    defaultValue={
-                                      cellVal !== null && cellVal !== undefined
-                                        ? String(cellVal)
-                                        : ""
-                                    }
-                                    onBlur={(e) => handleCellEdit(v, rowIdx, e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        (e.target as HTMLInputElement).blur();
-                                      }
-                                    }}
-                                    className="cell-input"
-                                  />
-                                </td>
-                              );
-                            })}
-                            <td style={{ textAlign: "center" }}>
-                              <button
-                                onClick={() => deleteObservationRow(rowIdx)}
-                                className="del-btn"
-                                title="Удалить строку"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* ============================================================== */}
-            {/* ВКЛАДКА 2: МНК-РЕГРЕССИЯ, Q-Q PLOT И ВЫБРОСЫ КУКА               */}
-            {/* ============================================================== */}
-            {activeTab === "ols" && (
-              <>
-                <div className="panel">
-                  <div className="panel-head">
-                    <h2 className="panel-title">Спецификация уравнения регрессии (МНК / OLS)</h2>
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#d4d4d8", cursor: "pointer" }}>
-                        <input
-                          type="checkbox"
-                          checked={includeConst}
-                          onChange={(e) => setIncludeConst(e.target.checked)}
-                          style={{ accentColor: "#d97706" }}
-                        />
-                        Константа (const)
-                      </label>
-                      <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#d4d4d8", cursor: "pointer" }}>
-                        <input
-                          type="checkbox"
-                          checked={useHC3}
-                          onChange={(e) => setUseHC3(e.target.checked)}
-                          style={{ accentColor: "#d97706" }}
-                        />
-                        Робастные ошибки Уайта (HC3)
-                      </label>
-                      <button onClick={handleRunOLS} className="btn btn-amber">
-                        <Play size={13} fill="#090a0c" /> Оценить модель
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="panel-body">
-                    <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: "16px", alignItems: "start" }}>
-                      <div>
-                        <label style={{ display: "block", fontSize: "11px", color: "#a1a1aa", marginBottom: "5px", textTransform: "uppercase" }}>
-                          Зависимая переменная (Y):
-                        </label>
-                        <select
-                          value={depVar}
-                          onChange={(e) => setDepVar(e.target.value)}
-                          className="input-field mono"
-                          style={{ width: "100%" }}
-                        >
-                          {varNames.map((v) => (
-                            <option key={v} value={v}>
-                              {v}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label style={{ display: "block", fontSize: "11px", color: "#a1a1aa", marginBottom: "5px", textTransform: "uppercase" }}>
-                          Объясняющие регрессоры (X):
-                        </label>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                          {varNames
-                            .filter((v) => v !== depVar)
-                            .map((v) => {
-                              const isAct = regressors.includes(v);
-                              return (
-                                <button
-                                  key={v}
-                                  onClick={() =>
-                                    setRegressors((prev) =>
-                                      prev.includes(v)
-                                        ? prev.filter((x) => x !== v)
-                                        : [...prev, v]
-                                    )
-                                  }
-                                  className={`tag-chip mono ${isAct ? "active" : ""}`}
-                                >
-                                  {isAct ? "■ " : "□ "}
-                                  {v}
-                                </button>
-                              );
-                            })}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {models.length > 1 && (
-                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-                    <span style={{ fontSize: "11px", color: "#71717a", textTransform: "uppercase" }}>
-                      Сессия моделей:
-                    </span>
-                    {models.map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => setActiveModelId(m.id)}
-                        className={`btn btn-sm mono ${m.id === activeModel?.id ? "btn-amber" : ""}`}
-                      >
-                        M{m.id}: {m.depVar} (R²={m.metrics.r2.toFixed(3)})
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {activeModel && (
-                  <div className="panel">
-                    <div className="panel-head">
-                      <h3 className="panel-title mono">
-                        Модель #{activeModel.id} // Зависимая переменная: {activeModel.depVar} (T = {activeModel.nObs}, df = {activeModel.dfResid})
-                      </h3>
-                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                        <button onClick={() => setActiveTab("steps")} className="btn btn-sm">
-                          <BookOpen size={13} color="#fbbf24" /> Показать матричное решение
-                        </button>
-                        <button onClick={() => saveModelSeriesToDf("resid")} className="btn btn-sm mono">
-                          + uhat_{activeModel.id}
-                        </button>
-                        <button onClick={() => saveModelSeriesToDf("fitted")} className="btn btn-sm mono">
-                          + yhat_{activeModel.id}
-                        </button>
-                        <button onClick={() => copyModelOutput("text")} className="btn btn-sm">
-                          {copiedType === "text" ? <Check size={13} color="#10b981" /> : <Copy size={13} />}
-                          Текст
-                        </button>
-                        <button onClick={() => copyModelOutput("latex")} className="btn btn-sm">
-                          {copiedType === "latex" ? <Check size={13} color="#10b981" /> : <FileCode size={13} />}
-                          LaTeX
-                        </button>
-                      </div>
-                    </div>
-
-                    <div
-                      className="mono"
-                      style={{
-                        padding: "10px 16px",
-                        background: "#0d0f12",
-                        borderBottom: "1px solid #272a30",
-                        color: "#fbbf24",
-                        fontSize: "12.5px",
-                        overflowX: "auto",
-                      }}
-                    >
-                      {formattedEquation}
-                    </div>
-
-                    <div style={{ overflowX: "auto" }}>
-                      <table className="data-table mono">
-                        <thead>
-                          <tr>
-                            <th>Регрессор</th>
-                            <th style={{ textAlign: "right" }}>Коэфф. (β)</th>
-                            <th style={{ textAlign: "right" }}>Ст. ошибка</th>
-                            <th style={{ textAlign: "right" }}>t-стат.</th>
-                            <th style={{ textAlign: "right" }}>p-value</th>
-                            <th style={{ textAlign: "right" }}>95% Дов. интервал</th>
-                            <th style={{ textAlign: "right" }}>Бета (β*)</th>
-                            <th style={{ textAlign: "right" }}>Эластичность</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {activeModel.coefficients.map((c) => (
-                            <tr key={c.name}>
-                              <td style={{ fontWeight: 700, color: "#f4f4f5" }}>{c.name}</td>
-                              <td style={{ textAlign: "right", color: "#fbbf24", fontWeight: 700 }}>
-                                {c.beta.toFixed(5)}
-                              </td>
-                              <td style={{ textAlign: "right", color: "#a1a1aa" }}>
-                                {c.se.toFixed(5)}
-                              </td>
-                              <td style={{ textAlign: "right" }}>{c.tStat.toFixed(4)}</td>
-                              <td
-                                style={{
-                                  textAlign: "right",
-                                  color: c.pValue < 0.05 ? "#10b981" : "#a1a1aa",
-                                  fontWeight: c.pValue < 0.05 ? 700 : 400,
-                                }}
-                              >
-                                {c.pValue < 0.0001 ? c.pValue.toExponential(2) : c.pValue.toFixed(4)}{" "}
-                                <span style={{ color: "#f59e0b" }}>{c.stars}</span>
-                              </td>
-                              <td style={{ textAlign: "right", color: "#a1a1aa", fontSize: "11.5px" }}>
-                                [{c.ciLow.toFixed(4)}; {c.ciHigh.toFixed(4)}]
-                              </td>
-                              <td style={{ textAlign: "right", color: "#d4d4d8" }}>
-                                {c.stdBeta !== null ? c.stdBeta.toFixed(4) : "—"}
-                              </td>
-                              <td style={{ textAlign: "right", color: "#d4d4d8" }}>
-                                {c.elasticity !== null ? `${c.elasticity.toFixed(3)}%` : "—"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className="panel-body">
-                      <div className="grid-4 mono" style={{ fontSize: "12px" }}>
-                        <div className="stat-box">
-                          <div style={{ color: "#71717a", fontSize: "11px" }}>R² / Скорр. R²</div>
-                          <div style={{ fontSize: "15px", fontWeight: 700, color: "#10b981", marginTop: "3px" }}>
-                            {activeModel.metrics.r2.toFixed(5)} / {activeModel.metrics.adjR2.toFixed(5)}
-                          </div>
-                        </div>
-                        <div className="stat-box">
-                          <div style={{ color: "#71717a", fontSize: "11px" }}>
-                            F({activeModel.dfModel}, {activeModel.dfResid}) [F_крит = {activeModel.metrics.fCrit95.toFixed(2)}]
-                          </div>
-                          <div style={{ fontSize: "15px", fontWeight: 700, color: "#f4f4f5", marginTop: "3px" }}>
-                            {activeModel.metrics.fStat.toFixed(2)}{" "}
-                            <span style={{ fontSize: "11.5px", color: "#10b981" }}>
-                              [p={activeModel.metrics.fPval.toExponential(2)}]
-                            </span>
-                          </div>
-                        </div>
-                        <div className="stat-box">
-                          <div style={{ color: "#71717a", fontSize: "11px" }}>SSR / TSS / SE</div>
-                          <div style={{ fontSize: "14px", fontWeight: 700, color: "#f4f4f5", marginTop: "3px" }}>
-                            {activeModel.metrics.ssr.toFixed(2)} / {activeModel.metrics.tss.toFixed(2)} / {activeModel.metrics.seReg.toFixed(3)}
-                          </div>
-                        </div>
-                        <div className="stat-box">
-                          <div style={{ color: "#71717a", fontSize: "11px" }}>DW / AIC / BIC</div>
-                          <div style={{ fontSize: "14px", fontWeight: 700, color: "#fbbf24", marginTop: "3px" }}>
-                            {activeModel.metrics.dw.toFixed(3)} | {activeModel.metrics.aic.toFixed(1)} | {activeModel.metrics.bic.toFixed(1)}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {activeModel && (
-                  <div className="grid-2">
-                    <div className="panel">
-                      <div className="panel-head">
-                        <span className="panel-title">
-                          Динамика: Фактические ({activeModel.depVar}) и Расчетные (Y_hat)
-                        </span>
-                      </div>
-                      <div className="panel-body" style={{ height: "260px" }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={activeModel.seriesData}>
-                            <CartesianGrid strokeDasharray="2 2" stroke="#22252c" />
-                            <XAxis dataKey="t" stroke="#71717a" fontSize={11} />
-                            <YAxis stroke="#71717a" fontSize={11} />
-                            <Tooltip
-                              contentStyle={{
-                                backgroundColor: "#14161a",
-                                borderColor: "#323741",
-                                fontSize: "12px",
-                              }}
-                            />
-                            <Legend wrapperStyle={{ fontSize: "12px" }} />
-                            <Line
-                              type="monotone"
-                              dataKey="actual"
-                              name={`Факт (${activeModel.depVar})`}
-                              stroke="#e4e4e7"
-                              strokeWidth={1.8}
-                              dot={{ r: 2 }}
-                            />
-                            <Line
-                              type="monotone"
-                              dataKey="fitted"
-                              name="Оценка МНК (Y_hat)"
-                              stroke="#d97706"
-                              strokeWidth={2}
-                              strokeDasharray="4 4"
-                              dot={false}
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-
-                    <div className="panel">
-                      <div className="panel-head">
-                        <span className="panel-title">
-                          Квантиль-квантильный график нормальности остатков (Normal Q-Q Plot)
-                        </span>
-                      </div>
-                      <div className="panel-body" style={{ height: "260px" }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <ScatterChart>
-                            <CartesianGrid strokeDasharray="2 2" stroke="#22252c" />
-                            <XAxis
-                              type="number"
-                              dataKey="theo"
-                              name="Теор. квантиль N(0,1)"
-                              stroke="#71717a"
-                              fontSize={11}
-                              domain={[-2.5, 2.5]}
-                            />
-                            <YAxis
-                              type="number"
-                              dataKey="emp"
-                              name="Стандартиз. остаток"
-                              stroke="#71717a"
-                              fontSize={11}
-                              domain={[-2.5, 2.5]}
-                            />
-                            <Tooltip
-                              contentStyle={{
-                                backgroundColor: "#14161a",
-                                borderColor: "#323741",
-                                fontSize: "12px",
-                              }}
-                            />
-                            <ReferenceLine
-                              segment={[
-                                { x: -2.4, y: -2.4 },
-                                { x: 2.4, y: 2.4 },
-                              ]}
-                              stroke="#d97706"
-                              strokeDasharray="3 3"
-                            />
-                            <Scatter name="Квантили остатков" data={activeModel.qqData} fill="#38bdf8" />
-                          </ScatterChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* ============================================================== */}
-            {/* ВКЛАДКА 3: ПОШАГОВЫЕ МАТРИЧНЫЕ ВЫКЛАДКИ (WOLFRAM STEP-BY-STEP)   */}
-            {/* ============================================================== */}
-            {activeTab === "steps" && activeModel && (
-              <>
-                <div className="panel">
-                  <div className="panel-head">
-                    <h2 className="panel-title">
-                      Пошаговый аналитический вывод МНК-оценок: β̂ = (X&apos;X)⁻¹ · X&apos;Y
-                    </h2>
-                    <span className="mono" style={{ fontSize: "11px", color: "#fbbf24" }}>
-                      Размерность матрицы плана X: {activeModel.nObs} × {activeModel.colNames.length}
-                    </span>
-                  </div>
-                  <div className="panel-body">
-                    <div className="step-block">
-                      <div style={{ fontWeight: 700, color: "#fbbf24", marginBottom: "4px" }}>
-                        Шаг 1. Система нормальных уравнений Гаусса и матрица (X&apos;X)
-                      </div>
-                      <p style={{ margin: "0 0 8px 0", color: "#a1a1aa", fontSize: "12px" }}>
-                        Минимизация суммы квадратов остатков S(β) = (Y - Xβ)&apos;(Y - Xβ) → min приводит к системе (X&apos;X)β = X&apos;Y. Ниже вычислена матрица Грамма (X&apos;X) и вектор правой части (X&apos;Y):
-                      </p>
-                      <div style={{ overflowX: "auto" }}>
-                        <table className="data-table mono">
-                          <thead>
-                            <tr>
-                              <th>Строка \ Столбец</th>
-                              {activeModel.colNames.map((c) => (
-                                <th key={c} style={{ textAlign: "right" }}>
-                                  {c}
-                                </th>
-                              ))}
-                              <th style={{ textAlign: "right", color: "#fbbf24" }}>Вектор X&apos;Y</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {activeModel.matrices.XTX.map((row, rIdx) => (
-                              <tr key={rIdx}>
-                                <td style={{ fontWeight: 700, color: "#d4d4d8" }}>
-                                  {activeModel.colNames[rIdx]}
-                                </td>
-                                {row.map((val, cIdx) => (
-                                  <td key={cIdx} style={{ textAlign: "right" }}>
-                                    {val.toFixed(2)}
-                                  </td>
-                                ))}
-                                <td style={{ textAlign: "right", fontWeight: 700, color: "#fbbf24" }}>
-                                  {activeModel.matrices.XTY[rIdx].toFixed(2)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-
-                    <div className="step-block">
-                      <div style={{ fontWeight: 700, color: "#fbbf24", marginBottom: "4px" }}>
-                        Шаг 2. Обратная матрица (X&apos;X)⁻¹ и Ковариационная матрица оценок Cov(β̂)
-                      </div>
-                      <p style={{ margin: "0 0 8px 0", color: "#a1a1aa", fontSize: "12px" }}>
-                        Квадратные корни из диагональных элементов матрицы Cov(β̂) = s²·(X&apos;X)⁻¹ (при s² = SSR / (T - K) ={" "}
-                        {(activeModel.metrics.ssr / activeModel.dfResid).toFixed(5)}) дают стандартные ошибки коэффициентов SE(β̂ⱼ):
-                      </p>
-                      <div className="grid-2">
-                        <div style={{ overflowX: "auto" }}>
-                          <div className="mono" style={{ fontSize: "11px", color: "#a1a1aa", marginBottom: "4px" }}>
-                            Обратная матрица (X&apos;X)⁻¹:
-                          </div>
-                          <table className="data-table mono">
-                            <thead>
-                              <tr>
-                                <th>(X&apos;X)⁻¹</th>
-                                {activeModel.colNames.map((c) => (
-                                  <th key={c} style={{ textAlign: "right" }}>
-                                    {c}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {activeModel.matrices.XTX_inv.map((row, rIdx) => (
-                                <tr key={rIdx}>
-                                  <td style={{ fontWeight: 700 }}>{activeModel.colNames[rIdx]}</td>
-                                  {row.map((val, cIdx) => (
-                                    <td key={cIdx} style={{ textAlign: "right" }}>
-                                      {val.toExponential(3)}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        <div style={{ overflowX: "auto" }}>
-                          <div className="mono" style={{ fontSize: "11px", color: "#a1a1aa", marginBottom: "4px" }}>
-                            Ковариационная матрица Cov(β̂) ({activeModel.useHC3 ? "Уайта HC3" : "Классическая"}):
-                          </div>
-                          <table className="data-table mono">
-                            <thead>
-                              <tr>
-                                <th>Cov(β̂)</th>
-                                {activeModel.colNames.map((c) => (
-                                  <th key={c} style={{ textAlign: "right" }}>
-                                    {c}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {activeModel.matrices.covBeta.map((row, rIdx) => (
-                                <tr key={rIdx}>
-                                  <td style={{ fontWeight: 700 }}>{activeModel.colNames[rIdx]}</td>
-                                  {row.map((val, cIdx) => (
-                                    <td
-                                      key={cIdx}
-                                      style={{
-                                        textAlign: "right",
-                                        color: rIdx === cIdx ? "#10b981" : "#a1a1aa",
-                                        fontWeight: rIdx === cIdx ? 700 : 400,
-                                      }}
-                                    >
-                                      {val.toExponential(3)}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="step-block" style={{ marginBottom: 0 }}>
-                      <div style={{ fontWeight: 700, color: "#fbbf24", marginBottom: "4px" }}>
-                        Шаг 3. Формальный протокол проверки статистических гипотез (при α = 0.05)
-                      </div>
-                      <div className="mono" style={{ fontSize: "12px", lineHeight: 1.6, color: "#d4d4d8" }}>
-                        <div>
-                          1. <strong>Проверка значимости уравнения в целом (F-тест Фишера):</strong>{" "}
-                          H₀: β₁ = β₂ = ... = βₖ = 0. Формула: F_набл = (ESS / {activeModel.dfModel}) / (SSR / {activeModel.dfResid}) ={" "}
-                          <span style={{ color: "#fbbf24", fontWeight: 700 }}>{activeModel.metrics.fStat.toFixed(3)}</span>. Критическое значение F_крит(0.05; {activeModel.dfModel}; {activeModel.dfResid}) ={" "}
-                          <span style={{ color: "#fbbf24" }}>{activeModel.metrics.fCrit95.toFixed(3)}</span>. Так как F_набл {activeModel.metrics.fStat > activeModel.metrics.fCrit95 ? ">" : "<"} F_крит, нулевая гипотеза{" "}
-                          <span style={{ color: "#10b981", fontWeight: 700 }}>
-                            {activeModel.metrics.fStat > activeModel.metrics.fCrit95 ? "ОТВЕРГАЕТСЯ (регрессия значима)" : "НЕ ОТВЕРГАЕТСЯ"}
-                          </span>.
-                        </div>
-                        <div style={{ marginTop: "4px" }}>
-                          2. <strong>Проверка индивидуальной значимости коэффициентов (t-тест Стьюдента):</strong>{" "}
-                          Критическое значение t_крит(0.05; df={activeModel.dfResid}) ={" "}
-                          <span style={{ color: "#fbbf24", fontWeight: 700 }}>±{activeModel.metrics.tCrit95.toFixed(4)}</span>. Все регрессоры с |t_набл| &gt; {activeModel.metrics.tCrit95.toFixed(2)} статистически значимы на 5%-м уровне.
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Диагностика влиятельных наблюдений и выбросов (Расстояние Кука D_i и рычаги h_ii) */}
-                <div className="panel">
-                  <div className="panel-head">
-                    <span className="panel-title">
-                      Анализ влиятельных наблюдений и выбросов (Рычаги h_ii и расстояние Кука D_i)
-                    </span>
-                    <span className="mono" style={{ fontSize: "11px", color: "#a1a1aa" }}>
-                      Порог высокой влиятельности Кука: D_i &gt; 4/T = {(4 / activeModel.nObs).toFixed(4)}
-                    </span>
-                  </div>
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="data-table mono">
-                      <thead>
-                        <tr>
-                          <th>Период (t)</th>
-                          <th style={{ textAlign: "right" }}>Факт (Y_t)</th>
-                          <th style={{ textAlign: "right" }}>Остаток (e_t)</th>
-                          <th style={{ textAlign: "right" }}>Рычаг матрицы проекций (h_ii)</th>
-                          <th style={{ textAlign: "right" }}>Расстояние Кука (D_i)</th>
-                          <th>Статус наблюдения</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {activeModel.diagnostics.topInfluential.map((pt) => {
-                          const isOutlier = pt.cooksD > 4 / activeModel.nObs;
-                          return (
-                            <tr key={pt.t}>
-                              <td style={{ fontWeight: 700, color: "#fbbf24" }}>t = {pt.t}</td>
-                              <td style={{ textAlign: "right" }}>{pt.actual.toFixed(4)}</td>
-                              <td style={{ textAlign: "right" }}>{pt.resid.toFixed(4)}</td>
-                              <td style={{ textAlign: "right" }}>{pt.leverage.toFixed(4)}</td>
-                              <td style={{ textAlign: "right", fontWeight: 700, color: isOutlier ? "#f59e0b" : "#10b981" }}>
-                                {pt.cooksD.toFixed(4)}
-                              </td>
-                              <td style={{ color: isOutlier ? "#f59e0b" : "#a1a1aa" }}>
-                                {isOutlier
-                                  ? "Влиятельное наблюдение (D_i > 4/T)"
-                                  : "В пределах допустимого коридора"}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* ============================================================== */}
-            {/* ВКЛАДКА 4: АВТОМАТИЧЕСКОЕ СРАВНЕНИЕ СПЕЦИФИКАЦИЙ                */}
-            {/* ============================================================== */}
-            {activeTab === "specs" && (
-              <div className="panel">
-                <div className="panel-head">
-                  <div>
-                    <h2 className="panel-title">
-                      Автоматический подбор функциональной формы (Линейная vs Кобба — Дугласа vs Экспоненциальная)
-                    </h2>
-                  </div>
-                  <span className="mono" style={{ fontSize: "11px", color: "#fbbf24" }}>
-                    Поправка якобиана Бокса — Кокса для сопоставимости AIC
-                  </span>
-                </div>
-                <div className="panel-body">
-                  <p style={{ margin: "0 0 14px 0", color: "#a1a1aa", fontSize: "12px" }}>
-                    Система автоматически оценивает конкурирующие математические спецификации для целевой переменной{" "}
-                    <strong className="mono" style={{ color: "#f4f4f5" }}>{depVar}</strong> и регрессоров{" "}
-                    <strong className="mono" style={{ color: "#f4f4f5" }}>{regressors.join(", ")}</strong>. Для моделей с логарифмированной зависимой переменной <span className="mono">ln(Y)</span> информационный критерий Акаике скорректирован на якобиан преобразования (<span className="mono">AIC_adj = AIC_lnY + 2·Σln(Y_t)</span>), что позволяет строго сравнивать их с линейной моделью:
-                  </p>
-
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="data-table mono">
-                      <thead>
-                        <tr>
-                          <th>Функциональная форма</th>
-                          <th>Аналитический вид</th>
-                          <th style={{ textAlign: "right" }}>R²</th>
-                          <th style={{ textAlign: "right" }}>Скорр. R²</th>
-                          <th style={{ textAlign: "right" }}>Сопоставимый AIC</th>
-                          <th style={{ textAlign: "right" }}>F-стат.</th>
-                          <th style={{ textAlign: "right" }}>RESET (p-val)</th>
-                          <th>Экономический смысл</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {specComparisons.map((sp, idx) => {
-                          const bestAic = Math.min(...specComparisons.map((s) => s.aicComparable));
-                          const isBest = Math.abs(sp.aicComparable - bestAic) < 1e-4;
-                          return (
-                            <tr key={idx}>
-                              <td style={{ fontWeight: 700, color: isBest ? "#10b981" : "#f4f4f5" }}>
-                                {isBest && "★ "}
-                                {sp.formName}
-                              </td>
-                              <td style={{ color: "#fbbf24" }}>{sp.formulaStr}</td>
-                              <td style={{ textAlign: "right", fontWeight: 700 }}>
-                                {sp.r2Native.toFixed(4)}
-                              </td>
-                              <td style={{ textAlign: "right" }}>{sp.adjR2Native.toFixed(4)}</td>
-                              <td
-                                style={{
-                                  textAlign: "right",
-                                  fontWeight: 700,
-                                  color: isBest ? "#10b981" : "#d4d4d8",
-                                }}
-                              >
-                                {sp.aicComparable.toFixed(2)}
-                              </td>
-                              <td style={{ textAlign: "right" }}>{sp.fStat.toFixed(2)}</td>
-                              <td
-                                style={{
-                                  textAlign: "right",
-                                  color: sp.resetPval > 0.05 ? "#10b981" : "#f59e0b",
-                                }}
-                              >
-                                {sp.resetPval.toFixed(4)}
-                              </td>
-                              <td style={{ fontFamily: "sans-serif", color: "#a1a1aa" }}>
-                                {sp.note}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ============================================================== */}
-            {/* ВКЛАДКА 5: АКФ/ЧАКФ, ОПИСАТЕЛЬНАЯ СТАТИСТИКА И ADF-ТЕСТ         */}
-            {/* ============================================================== */}
-            {activeTab === "stats" && (
-              <>
-                <div className="panel" style={{ overflow: "hidden" }}>
-                  <div className="panel-head">
-                    <h2 className="panel-title">Сводная таблица описательных статистик</h2>
-                  </div>
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="data-table mono">
-                      <thead>
-                        <tr>
-                          <th>Переменная</th>
-                          <th style={{ textAlign: "right" }}>Среднее</th>
-                          <th style={{ textAlign: "right" }}>Медиана</th>
-                          <th style={{ textAlign: "right" }}>Ст. откл. (σ)</th>
-                          <th style={{ textAlign: "right" }}>Минимум</th>
-                          <th style={{ textAlign: "right" }}>Максимум</th>
-                          <th style={{ textAlign: "right" }}>Коэф. вариации (CV%)</th>
-                          <th style={{ textAlign: "right" }}>Асимметрия</th>
-                          <th style={{ textAlign: "right" }}>Набл. (N)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {varStats.map((s) => (
-                          <tr key={s.name}>
-                            <td style={{ fontWeight: 700, color: "#fbbf24" }}>{s.name}</td>
-                            <td style={{ textAlign: "right" }}>{s.mean.toFixed(4)}</td>
-                            <td style={{ textAlign: "right" }}>{s.median.toFixed(4)}</td>
-                            <td style={{ textAlign: "right" }}>{s.std.toFixed(4)}</td>
-                            <td style={{ textAlign: "right" }}>{s.min.toFixed(4)}</td>
-                            <td style={{ textAlign: "right" }}>{s.max.toFixed(4)}</td>
-                            <td style={{ textAlign: "right" }}>{s.cv.toFixed(2)}%</td>
-                            <td style={{ textAlign: "right" }}>{s.skew.toFixed(4)}</td>
-                            <td style={{ textAlign: "right", color: "#a1a1aa" }}>{s.n}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* КОРРЕЛОГРАММА ACF / PACF И Q-ТЕСТ ЛЬЮНГА — БОКСА */}
-                <div className="grid-2">
-                  <div className="panel">
-                    <div className="panel-head">
-                      <span className="panel-title">
-                        Коррелограмма АКФ и ЧАКФ (Q-стат. Льюнга — Бокса = {correlogramResult.qStat}, p = {correlogramResult.qPval})
-                      </span>
-                      <select
-                        value={tsVar}
-                        onChange={(e) => setTsVar(e.target.value)}
-                        className="input-field mono"
-                      >
-                        {varNames.map((v) => (
-                          <option key={v} value={v}>
-                            {v}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="panel-body" style={{ height: "270px" }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={correlogramResult.lags}>
-                          <CartesianGrid strokeDasharray="2 2" stroke="#22252c" />
-                          <XAxis dataKey="lag" stroke="#71717a" fontSize={11} />
-                          <YAxis stroke="#71717a" fontSize={11} domain={[-1, 1]} />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: "#14161a",
-                              borderColor: "#323741",
-                              fontSize: "12px",
-                            }}
-                          />
-                          <Legend wrapperStyle={{ fontSize: "12px" }} />
-                          <ReferenceLine
-                            y={correlogramResult.bartlettBand}
-                            stroke="#ef4444"
-                            strokeDasharray="3 3"
-                          />
-                          <ReferenceLine
-                            y={-correlogramResult.bartlettBand}
-                            stroke="#ef4444"
-                            strokeDasharray="3 3"
-                          />
-                          <ReferenceLine y={0} stroke="#52525b" />
-                          <Bar dataKey="acf" name="АКФ (ACF)" fill="#d97706" />
-                          <Bar dataKey="pacf" name="ЧАКФ (PACF)" fill="#38bdf8" />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  {/* ADF-тест + Корреляции */}
-                  <div className="panel">
-                    <div className="panel-head">
-                      <span className="panel-title">Тест Дики — Фуллера (ADF) и Матрица корреляций</span>
-                    </div>
-                    <div className="panel-body mono" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                      <div className="stat-box">
-                        <div style={{ color: "#a1a1aa", fontSize: "11px" }}>
-                          ADF для «{tsVar}» (константа / константа + тренд):
-                        </div>
-                        <div style={{ fontSize: "14px", fontWeight: 700, marginTop: "3px" }}>
-                          τ_c = {adfResult.constModel.tau.toFixed(4)} (5% крит: -2.91) | τ_ct = {adfResult.trendModel.tau.toFixed(4)} (5% крит: -3.49)
-                        </div>
-                        <div style={{ color: adfResult.constModel.stationary ? "#10b981" : "#f59e0b", marginTop: "3px", fontFamily: "sans-serif" }}>
-                          {adfResult.constModel.stationary
-                            ? "Ряд стационарен в уровнях I(0)"
-                            : "Ряд нестационарен (рекомендуется взять первую разность ΔX)"}
-                        </div>
-                      </div>
-
-                      <div style={{ overflowX: "auto" }}>
-                        <table className="data-table mono">
-                          <thead>
-                            <tr>
-                              <th>r (Пирсон)</th>
-                              {varNames.slice(0, 6).map((v) => (
-                                <th key={v} style={{ textAlign: "right" }}>
-                                  {v}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {varNames.slice(0, 6).map((rVar) => (
-                              <tr key={rVar}>
-                                <td style={{ fontWeight: 700, color: "#d4d4d8" }}>{rVar}</td>
-                                {varNames.slice(0, 6).map((cVar) => {
-                                  const r = pearsonCorr(df[rVar], df[cVar]);
-                                  const strong = Math.abs(r) > 0.6 && rVar !== cVar;
-                                  return (
-                                    <td
-                                      key={cVar}
-                                      style={{
-                                        textAlign: "right",
-                                        color: strong ? "#fbbf24" : "#a1a1aa",
-                                        fontWeight: strong ? 700 : 400,
-                                      }}
-                                    >
-                                      {r.toFixed(3)}
-                                    </td>
-                                  );
-                                })}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* ============================================================== */}
-            {/* ВКЛАДКА 6: ЦЕПИ МАРКОВА И ФУНДАМЕНТАЛЬНАЯ МАТРИЦА КЕМЕНИ — СНЕЛЛА */}
-            {/* ============================================================== */}
-            {activeTab === "markov" && (
-              <>
-                <div className="grid-2">
-                  <div className="panel">
-                    <div className="panel-head">
-                      <span className="panel-title">Матрица переходных вероятностей P_ij</span>
-                      <select
-                        value={markovVar}
-                        onChange={(e) => setMarkovVar(e.target.value)}
-                        className="input-field mono"
-                      >
-                        {varNames.map((v) => (
-                          <option key={v} value={v}>
-                            {v}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="panel-body">
-                      <div style={{ marginBottom: "12px", fontSize: "12px", color: "#a1a1aa", display: "flex", justifyContent: "space-between", flexWrap: "wrap" }}>
-                        <span>
-                          Текущая фаза (t = {nRows}):{" "}
-                          <strong className="mono" style={{ color: "#fbbf24" }}>
-                            {markovResult.currentState}
-                          </strong>
-                        </span>
-                        <span className="mono">
-                          |λ₂| = {markovResult.lambda2Mod.toFixed(4)} | τ_mix ≈ {markovResult.mixingTime.toFixed(2)} пер.
-                        </span>
-                      </div>
-
-                      <table className="data-table mono">
-                        <thead>
-                          <tr>
-                            <th>Из (t) \ В (t+1)</th>
-                            {markovResult.shortLabels.map((l) => (
-                              <th key={l} style={{ textAlign: "right" }}>
-                                {l}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {markovResult.P.map((row, i) => (
-                            <tr key={i}>
-                              <td>
-                                <div style={{ fontWeight: 700, color: "#f4f4f5" }}>
-                                  {markovResult.shortLabels[i]}
-                                </div>
-                                <div style={{ fontSize: "10.5px", color: "#71717a" }}>
-                                  {markovResult.bounds[i]}
-                                </div>
-                              </td>
-                              {row.map((prob, j) => (
-                                <td key={j} style={{ textAlign: "right" }}>
-                                  <div style={{ fontWeight: 700, color: prob > 0.4 ? "#fbbf24" : "#e4e4e7" }}>
-                                    {prob.toFixed(4)} ({(prob * 100).toFixed(1)}%)
-                                  </div>
-                                  <div style={{ fontSize: "10.5px", color: "#71717a" }}>
-                                    n = {markovResult.counts[i][j]}
-                                  </div>
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-
-                      <div style={{ marginTop: "16px" }}>
-                        <div style={{ fontSize: "11px", color: "#a1a1aa", textTransform: "uppercase", marginBottom: "8px" }}>
-                          Эргодический стационарный вектор (π · P = π):
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" }}>
-                          {markovResult.shortLabels.map((l, idx) => (
-                            <div key={l} className="stat-box mono" style={{ textAlign: "center" }}>
-                              <div style={{ fontSize: "11px", color: "#a1a1aa" }}>{l}</div>
-                              <div style={{ fontSize: "15px", fontWeight: 700, color: "#10b981", marginTop: "3px" }}>
-                                {(markovResult.stationary[idx] * 100).toFixed(2)}%
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="panel">
-                    <div className="panel-head">
-                      <span className="panel-title">
-                        Прогноз распределения вероятностей состояний (S_t = S_0 · P^t)
-                      </span>
-                    </div>
-                    <div className="panel-body" style={{ height: "340px" }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={markovResult.forecast}>
-                          <CartesianGrid strokeDasharray="2 2" stroke="#22252c" />
-                          <XAxis dataKey="step" stroke="#71717a" fontSize={12} />
-                          <YAxis stroke="#71717a" fontSize={12} unit="%" />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: "#14161a",
-                              borderColor: "#323741",
-                              fontSize: "12px",
-                            }}
-                          />
-                          <Legend wrapperStyle={{ fontSize: "12px" }} />
-                          <Bar dataKey="S1" name="S1 (Спад)" fill="#ef4444" />
-                          <Bar dataKey="S2" name="S2 (Стагнация)" fill="#d97706" />
-                          <Bar dataKey="S3" name="S3 (Рост)" fill="#10b981" />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                </div>
-
-                {/* ФУНДАМЕНТАЛЬНАЯ МАТРИЦА КЕМЕНИ — СНЕЛЛА Z И МАТРИЦА ВРЕМЕНИ ДОСТИЖЕНИЯ M_ij */}
-                <div className="grid-2">
-                  <div className="panel">
-                    <div className="panel-head">
-                      <span className="panel-title">
-                        Матрица среднего времени первого достижения фаз M_ij (в периодах)
-                      </span>
-                    </div>
-                    <div className="panel-body">
-                      <p style={{ margin: "0 0 10px 0", fontSize: "12px", color: "#a1a1aa" }}>
-                        Внедиагональные элементы <span className="mono">M_ij = (Z_jj - Z_ij) / π_j</span> показывают, через сколько в среднем периодов система впервые перейдет из фазы <em>i</em> в фазу <em>j</em>. На главной диагонали — среднее время возврата <span className="mono">M_ii = 1 / π_i</span>:
-                      </p>
-                      <table className="data-table mono">
-                        <thead>
-                          <tr>
-                            <th>Из \ В фазу</th>
-                            {markovResult.shortLabels.map((l) => (
-                              <th key={l} style={{ textAlign: "right" }}>
-                                {l}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {markovResult.M.map((row, i) => (
-                            <tr key={i}>
-                              <td style={{ fontWeight: 700 }}>{markovResult.shortLabels[i]}</td>
-                              {row.map((val, j) => (
-                                <td
-                                  key={j}
-                                  style={{
-                                    textAlign: "right",
-                                    color: i === j ? "#10b981" : "#fbbf24",
-                                    fontWeight: 700,
-                                  }}
-                                >
-                                  {val.toFixed(2)} пер.
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className="panel">
-                    <div className="panel-head">
-                      <span className="panel-title">
-                        Фундаментальная матрица Кемени — Снелла Z = (I - P + Π)⁻¹
-                      </span>
-                    </div>
-                    <div className="panel-body">
-                      <p style={{ margin: "0 0 10px 0", fontSize: "12px", color: "#a1a1aa" }}>
-                        Используется для аналитического вычисления дисперсий времени перехода и асимптотического поведения эргодической цепи Маркова:
-                      </p>
-                      <table className="data-table mono">
-                        <thead>
-                          <tr>
-                            <th>Z_ij</th>
-                            {markovResult.shortLabels.map((l) => (
-                              <th key={l} style={{ textAlign: "right" }}>
-                                {l}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {markovResult.Z.map((row, i) => (
-                            <tr key={i}>
-                              <td style={{ fontWeight: 700 }}>{markovResult.shortLabels[i]}</td>
-                              {row.map((val, j) => (
-                                <td key={j} style={{ textAlign: "right" }}>
-                                  {val.toFixed(5)}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </main>
-      </div>
-
-      {/* НИЖНЯЯ СТРОКА СОСТОЯНИЯ */}
-      <footer className="statusbar mono">
-        <span>{statusLine}</span>
-        <span>TED WORKBENCH v2.0 // MATRIX OLS • KEMENY-SNELL MARKOV • BOX-COX SPECS</span>
-      </footer>
     </div>
   );
 }
