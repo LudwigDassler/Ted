@@ -7,7 +7,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 // ============================================================================
 
 type HealthState = "GOOD" | "CAUTION" | "BAD";
-type VisualThemeId = "mind_explosion" | "church_lasers" | "custom_1" | "custom_2";
+type VisualThemeId = "the_expression" | "dolores_pieta" | "mind_explosion" | "custom_1" | "custom_2";
 
 interface SmartAttribute {
   id: string;
@@ -39,6 +39,7 @@ interface DriveProfile {
   transferMode: string;
   standard: string;
   features: string;
+  nandEndurance: string;
   healthStatus: HealthState;
   healthPercent: number;
   temperature: number;
@@ -87,14 +88,14 @@ class ElysiumSound {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = status === "BAD" ? "sawtooth" : "sine";
-      osc.frequency.setValueAtTime(status === "BAD" ? 150 : 480, t);
-      osc.frequency.exponentialRampToValueAtTime(60, t + 0.045);
-      gain.gain.setValueAtTime(0.09, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.045);
+      osc.frequency.setValueAtTime(status === "BAD" ? 145 : 460, t);
+      osc.frequency.exponentialRampToValueAtTime(55, t + 0.042);
+      gain.gain.setValueAtTime(0.08, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.042);
       osc.connect(gain);
       gain.connect(this.ctx.destination);
       osc.start(t);
-      osc.stop(t + 0.05);
+      osc.stop(t + 0.048);
     } catch {}
   }
 
@@ -104,7 +105,7 @@ class ElysiumSound {
       this.init();
       if (!this.ctx) return;
       const t = this.ctx.currentTime;
-      const notes = success ? [220, 277.18, 329.63, 440, 554.37] : [110, 116.54, 164.81];
+      const notes = success ? [196.0, 246.94, 293.66, 369.99, 440.0] : [98.0, 103.83, 146.83];
       notes.forEach((freq, i) => {
         if (!this.ctx) return;
         const osc = this.ctx.createOscillator();
@@ -112,7 +113,7 @@ class ElysiumSound {
         osc.type = success ? "triangle" : "sawtooth";
         osc.frequency.setValueAtTime(freq, t + i * 0.04);
         g.gain.setValueAtTime(0.001, t + i * 0.04);
-        g.gain.linearRampToValueAtTime(success ? 0.05 : 0.035, t + i * 0.04 + 0.08);
+        g.gain.linearRampToValueAtTime(success ? 0.048 : 0.035, t + i * 0.04 + 0.07);
         g.gain.exponentialRampToValueAtTime(0.0005, t + 1.5);
         osc.connect(g);
         g.connect(this.ctx.destination);
@@ -126,10 +127,10 @@ class ElysiumSound {
 const soundFX = new ElysiumSound();
 
 // ============================================================================
-// 3. ПОЛНОЭКРАННЫЙ ХУДОЖЕСТВЕННЫЙ ХОЛСТ (АНАТОМИЧЕСКИЙ ПОРТРЕТ + ФОН НА ВСЁ ОКНО)
+// 3. ЖИВОПИСНЫЙ ДВИЖОК ЩЕТИННОЙ КИСТИ И МАСТИХИНА (IMPASTO BRISTLE ENGINE)
 // ============================================================================
 
-function FullWindowMasterpieceCanvas({
+function PainterlyMasterpieceCanvas({
   themeId,
   customUrl,
   health,
@@ -149,616 +150,484 @@ function FullWindowMasterpieceCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let animId: number;
-    let frame = 0;
+    const W = canvas.width;
+    const H = canvas.height;
 
-    // Генерируем 140 многослойных живописных мазков психоделического выброса
-    const shards = Array.from({ length: 140 }, (_, i) => {
-      const baseAngle = -Math.PI * 0.82 + (i / 140) * (Math.PI * 0.78);
-      const length = 90 + ((i * 89) % 460);
-      const width = 0.012 + ((i * 17) % 10) * 0.0045;
-      const palette = [
-        "#ff0a6c", // Глубокая карминно-неоновая фуксия
-        "#ff4800", // Огненный кадмий
-        "#ffb703", // Тёплое золото
-        "#00e5ff", // Лазурный циан
-        "#7209b7", // Королевский фиолет
-        "#f72585", // Пурпурный
-        "#4cc9f0", // Холодный голубой блик
-        "#fb5607", // Янтарно-оранжевый
-      ];
-      return {
-        angle: baseAngle,
-        length,
-        width,
-        color: palette[i % palette.length],
-        phase: i * 0.37,
-      };
-    });
+    // Офскрин-холст для тяжёлой многослойной масляной живописи (рендерится 1 раз при смене сцены)
+    const offscreen = document.createElement("canvas");
+    offscreen.width = W;
+    offscreen.height = H;
+    const octx = offscreen.getContext("2d");
+    if (!octx) return;
 
-    // Пылинки и мазки краски, парящие по всему фону окна (и под таблицей справа)
-    const motes = Array.from({ length: 55 }, (_, i) => ({
-      x: (i * 193) % 1280,
-      y: (i * 137) % 820,
-      r: 1.5 + (i % 4) * 1.4,
-      ang: (i * 0.6) % Math.PI,
-      color: i % 3 === 0 ? "#ffbe0b" : i % 3 === 1 ? "#ff0a6c" : "#00e5ff",
-    }));
-
-    const render = () => {
-      frame += 1;
-      const W = canvas.width;
-      const H = canvas.height;
-      const t = frame * 0.016;
-
-      if (themeId === "mind_explosion") {
-        // ====================================================================
-        // СЦЕНА 1: АНАТОМИЧЕСКИЙ ПОРТРЕТ ГАРРИ «ВЗРЫВ СОЗНАНИЯ (B' B'' B''')»
-        // ====================================================================
-
-        // 1. Глубокий живописный фон на ВСЁ окно (индиго-умбра с архитектурной сеткой Ревашоля справа)
-        const bgGrad = ctx.createRadialGradient(230, 310, 40, 560, 410, 980);
-        bgGrad.addColorStop(0, "#2b0d38");
-        bgGrad.addColorStop(0.38, "#130b21");
-        bgGrad.addColorStop(0.75, "#0b0914");
-        bgGrad.addColorStop(1, "#07060c");
-        ctx.fillStyle = bgGrad;
-        ctx.fillRect(0, 0, W, H);
-
-        // Тонкая перспективная сетка изолятора Сероты и архитектурные своды на фоне под таблицей справа
-        ctx.save();
-        ctx.strokeStyle = "rgba(148, 163, 184, 0.055)";
-        ctx.lineWidth = 1;
-        for (let gx = 380; gx < W; gx += 64) {
-          ctx.beginPath();
-          ctx.moveTo(gx, 0);
-          ctx.lineTo(gx - 120, H);
-          ctx.stroke();
-        }
-        for (let gy = 60; gy < H; gy += 64) {
-          ctx.beginPath();
-          ctx.moveTo(340, gy);
-          ctx.lineTo(W, gy + 40);
-          ctx.stroke();
-        }
-        ctx.restore();
-
-        // Точка пробоя сознания (висок и лоб Гарри)
-        const originX = 212;
-        const originY = 318;
-
-        // 2. Многослойное внутреннее свечение взрыва
-        const coreGlow = ctx.createRadialGradient(
-          originX - 45,
-          originY - 75,
-          8,
-          originX - 20,
-          originY - 60,
-          390
-        );
-        coreGlow.addColorStop(0, "rgba(255, 240, 170, 0.98)");
-        coreGlow.addColorStop(0.18, "rgba(255, 140, 20, 0.85)");
-        coreGlow.addColorStop(0.42, "rgba(255, 10, 108, 0.55)");
-        coreGlow.addColorStop(0.72, "rgba(114, 9, 183, 0.22)");
-        coreGlow.addColorStop(1, "transparent");
-        ctx.fillStyle = coreGlow;
-        ctx.fillRect(0, 0, W, H);
-
-        // 3. Живописный веер мазков и кристаллов, разлетающихся из головы влево-вверх и на правую панель
-        ctx.save();
-        ctx.globalCompositeOperation = "screen";
-        shards.forEach((sh, idx) => {
-          const breathe = Math.sin(t * 1.2 + sh.phase) * 10;
-          const a = sh.angle + Math.sin(t * 0.5 + idx) * 0.01;
-          const len = sh.length + breathe + (temp > 50 ? 30 : 0);
-
-          const x0 = originX + Math.cos(a) * 8;
-          const y0 = originY + Math.sin(a) * 8;
-          const x1 = originX + Math.cos(a - sh.width) * (len * 0.65);
-          const y1 = originY + Math.sin(a - sh.width) * (len * 0.65);
-          const x2 = originX + Math.cos(a) * len;
-          const y2 = originY + Math.sin(a) * len;
-          const x3 = originX + Math.cos(a + sh.width) * (len * 0.78);
-          const y3 = originY + Math.sin(a + sh.width) * (len * 0.78);
-
-          ctx.fillStyle = sh.color;
-          ctx.globalAlpha = idx % 4 === 0 ? 0.88 : 0.62;
-          ctx.beginPath();
-          ctx.moveTo(x0, y0);
-          ctx.lineTo(x1, y1);
-          ctx.lineTo(x2, y2);
-          ctx.lineTo(x3, y3);
-          ctx.closePath();
-          ctx.fill();
-        });
-        ctx.restore();
-
-        // 4. Длинные белые меловые траектории и формулы B', B'', B''', тянущиеся через ВЕСЬ фон окна
-        ctx.save();
-        ctx.strokeStyle = "rgba(186, 230, 253, 0.32)";
-        ctx.lineWidth = 1.8;
-        [0, 1, 2, 3].forEach((k) => {
-          ctx.beginPath();
-          ctx.moveTo(originX, originY - 12);
-          ctx.bezierCurveTo(
-            originX + 110,
-            140 - k * 32,
-            520,
-            70 + k * 45,
-            W - 40,
-            25 + k * 85
-          );
-          ctx.stroke();
-        });
-
-        ctx.font = "italic 700 25px 'Cormorant Garamond', Georgia, serif";
-        ctx.fillStyle = "rgba(224, 242, 254, 0.75)";
-        ctx.fillText("B'", 288, 146 + Math.sin(t) * 3);
-        ctx.font = "italic 700 22px 'Cormorant Garamond', Georgia, serif";
-        ctx.fillText("B''", 358, 86 + Math.cos(t) * 3);
-        ctx.font = "italic 600 19px 'Cormorant Garamond', Georgia, serif";
-        ctx.fillText("B'''", 342, 198 + Math.sin(t * 0.8) * 3);
-
-        // Дополнительные меловые заметки под полупрозрачной таблицей справа
-        ctx.font = "italic 600 18px 'Cormorant Garamond', Georgia, serif";
-        ctx.fillStyle = "rgba(224, 242, 254, 0.16)";
-        ctx.fillText("∂Ψ / ∂t = −∇·J + Λ(Pale)", 540, 115);
-        ctx.fillText("REVACHOL WEST // SECTOR 41 TELEMETRY", 780, 775);
-        ctx.restore();
-
-        // ====================================================================
-        // 5. ДЕТАЛЬНЫЙ АНАТОМИЧЕСКИЙ ПОРТРЕТ ГАРРИ ДЮБУА (СВЕТОТЕНЬ И МАЗКИ)
-        // ====================================================================
-        ctx.save();
-
-        // 5.1. Задняя масса тёмных растрёпанных волос
-        ctx.fillStyle = "#11091a";
-        ctx.beginPath();
-        ctx.moveTo(215, 252);
-        ctx.bezierCurveTo(265, 242, 315, 275, 332, 345);
-        ctx.bezierCurveTo(345, 395, 328, 455, 295, 480);
-        ctx.lineTo(225, 440);
-        ctx.closePath();
-        ctx.fill();
-
-        // Отдельные живописные пряди волос
-        ctx.strokeStyle = "#2a163b";
-        ctx.lineWidth = 4;
-        [0, 1, 2, 3, 4].forEach((s) => {
-          ctx.beginPath();
-          ctx.moveTo(245 + s * 8, 258 + s * 6);
-          ctx.quadraticCurveTo(305 + s * 5, 295, 318 - s * 4, 385 + s * 10);
-          ctx.stroke();
-        });
-
-        // 5.2. Торс, плечи и пиджак с фактурными лацканами
-        const coatGrad = ctx.createLinearGradient(40, 460, 360, H);
-        coatGrad.addColorStop(0, "#241130");
-        coatGrad.addColorStop(0.5, "#150a1e");
-        coatGrad.addColorStop(1, "#09050e");
-        ctx.fillStyle = coatGrad;
-        ctx.beginPath();
-        ctx.moveTo(10, H);
-        ctx.lineTo(48, 535);
-        ctx.quadraticCurveTo(105, 468, 152, 452);
-        ctx.lineTo(288, 468);
-        ctx.quadraticCurveTo(355, 495, 405, H);
-        ctx.closePath();
-        ctx.fill();
-
-        // Левый лацкан пиджака, освещённый пурпурно-розовым светом взрыва
-        const lapelGrad = ctx.createLinearGradient(85, 460, 175, 620);
-        lapelGrad.addColorStop(0, "#6c246e");
-        lapelGrad.addColorStop(0.5, "#42164b");
-        lapelGrad.addColorStop(1, "#1d0c26");
-        ctx.fillStyle = lapelGrad;
-        ctx.beginPath();
-        ctx.moveTo(82, 535);
-        ctx.lineTo(148, 452);
-        ctx.lineTo(168, 495);
-        ctx.lineTo(155, 645);
-        ctx.lineTo(95, 610);
-        ctx.closePath();
-        ctx.fill();
-
-       ctx.moveTo(152, 448);
-ctx.lineTo(142, 522);
-ctx.lineTo(168, 498);
-ctx.closePath();
-ctx.fill();
-
-        // 5.3. Анатомия запрокинутой шеи (грудино-ключично-сосцевидная мышца и гортань)
-        const neckShadow = ctx.createLinearGradient(145, 370, 265, 490);
-        neckShadow.addColorStop(0, "#752c68");
-        neckShadow.addColorStop(0.55, "#461847");
-        neckShadow.addColorStop(1, "#220c29");
-        ctx.fillStyle = neckShadow;
-        ctx.beginPath();
-        ctx.moveTo(155, 382);
-        ctx.lineTo(256, 398);
-        ctx.lineTo(248, 515);
-        ctx.lineTo(148, 468);
-        ctx.closePath();
-        ctx.fill();
-
-        // Яркий тепло-розовый свет на передней поверхности гортани и сухожилии шеи
-        const neckLight = ctx.createLinearGradient(152, 380, 205, 480);
-        neckLight.addColorStop(0, "#ff9ebb");
-        neckLight.addColorStop(0.5, "#d95b82");
-        neckLight.addColorStop(1, "rgba(117, 44, 104, 0)");
-        ctx.fillStyle = neckLight;
-        ctx.beginPath();
-        ctx.moveTo(156, 384);
-        ctx.quadraticCurveTo(188, 415, 195, 485);
-        ctx.lineTo(162, 472);
-        ctx.quadraticCurveTo(152, 425, 156, 384);
-        ctx.closePath();
-        ctx.fill();
-
-        // 5.4. Скульптурная форма запрокинутой головы
-        const faceBase = ctx.createLinearGradient(155, 265, 285, 410);
-        faceBase.addColorStop(0, "#ffcad4");
-        faceBase.addColorStop(0.28, "#f27a94");
-        faceBase.addColorStop(0.62, "#9d3c72");
-        faceBase.addColorStop(1, "#4c1b47");
-        ctx.fillStyle = faceBase;
-        ctx.beginPath();
-        ctx.moveTo(154, 342); // Левая скула
-        ctx.quadraticCurveTo(165, 295, 196, 268); // Висок и лоб
-        ctx.quadraticCurveTo(235, 256, 268, 276); // Верхняя часть лба
-        ctx.quadraticCurveTo(296, 305, 286, 358); // Правая скула и ухо
-        ctx.quadraticCurveTo(272, 405, 228, 415); // Челюсть
-        ctx.quadraticCurveTo(175, 402, 154, 342);
-        ctx.closePath();
-        ctx.fill();
-
-        // 5.5. Световые плоскости лба, скул и надбровных дуг (импасто блики)
-        ctx.fillStyle = "#ffe5ec";
-        ctx.beginPath();
-        ctx.moveTo(192, 272);
-        ctx.quadraticCurveTo(224, 264, 245, 278);
-        ctx.quadraticCurveTo(232, 296, 196, 292);
-        ctx.closePath();
-        ctx.fill();
-
-        // Морщины на запрокинутом лбу
-        ctx.strokeStyle = "#9d3c72";
-        ctx.lineWidth = 2.2;
-        ctx.beginPath();
-        ctx.moveTo(196, 278);
-        ctx.quadraticCurveTo(222, 272, 248, 285);
-        ctx.moveTo(192, 286);
-        ctx.quadraticCurveTo(218, 281, 244, 293);
-        ctx.stroke();
-
-        // 5.6. Глубокие глазницы, веки и закатившиеся белки глаз
-        // Левая глазница (ближе к взрыву)
-        ctx.fillStyle = "#591d49";
-        ctx.beginPath();
-        ctx.ellipse(186, 308, 15, 9, -0.25, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#fff0f3";
-        ctx.beginPath();
-        ctx.ellipse(187, 309, 10, 5, -0.25, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Правая глазница (в драматической полутени под бровью)
-        ctx.fillStyle = "#42143b";
-        ctx.beginPath();
-        ctx.ellipse(244, 318, 17, 10, 0.22, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#ffd6e0";
-        ctx.beginPath();
-        ctx.ellipse(243, 320, 11, 5.5, 0.22, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Густые изломанные брови Гарри
-        ctx.fillStyle = "#260d29";
-        ctx.beginPath();
-        ctx.moveTo(170, 300);
-        ctx.quadraticCurveTo(188, 290, 204, 301);
-        ctx.lineTo(201, 306);
-        ctx.quadraticCurveTo(186, 297, 172, 304);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.moveTo(226, 304);
-        ctx.quadraticCurveTo(248, 296, 268, 315);
-        ctx.lineTo(264, 321);
-        ctx.quadraticCurveTo(246, 305, 226, 310);
-        ctx.closePath();
-        ctx.fill();
-
-        // 5.7. Анатомический нос в ракурсе снизу (переносица, кончик носа и ноздри)
-        const noseGrad = ctx.createLinearGradient(195, 295, 232, 348);
-        noseGrad.addColorStop(0, "#ffe5ec");
-        noseGrad.addColorStop(0.5, "#f78ca2");
-        noseGrad.addColorStop(1, "#6e2252");
-        ctx.fillStyle = noseGrad;
-        ctx.beginPath();
-        ctx.moveTo(212, 298); // Переносица
-        ctx.lineTo(194, 328); // Кончик носа
-        ctx.lineTo(204, 344); // Основание носа
-        ctx.lineTo(232, 342); // Правое крыло носа
-        ctx.lineTo(224, 305);
-        ctx.closePath();
-        ctx.fill();
-
-        // Тёмные ноздри (ракурс снизу, как на референсе image_542721)
-        ctx.fillStyle = "#2b0c28";
-        ctx.beginPath();
-        ctx.ellipse(202, 336, 5.5, 3.5, -0.3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(218, 338, 6, 3.8, 0.25, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Яркий розовый треугольник света на правой щеке под глазом
-        ctx.fillStyle = "#ffadc2";
-        ctx.beginPath();
-        ctx.moveTo(226, 326);
-        ctx.lineTo(256, 334);
-        ctx.lineTo(244, 368);
-        ctx.lineTo(222, 348);
-        ctx.closePath();
-        ctx.fill();
-
-        // 5.8. Объёмные усы и бакенбарды с живописными прядями
-        const beardGrad = ctx.createLinearGradient(150, 340, 275, 425);
-        beardGrad.addColorStop(0, "#3b173b");
-        beardGrad.addColorStop(0.5, "#240d28");
-        beardGrad.addColorStop(1, "#14071a");
-        ctx.fillStyle = beardGrad;
-        ctx.beginPath();
-        ctx.moveTo(152, 355);
-        ctx.quadraticCurveTo(178, 336, 208, 342);
-        ctx.quadraticCurveTo(242, 348, 266, 382);
-        ctx.lineTo(282, 355);
-        ctx.lineTo(278, 422);
-        ctx.quadraticCurveTo(250, 425, 232, 398);
-        ctx.quadraticCurveTo(205, 368, 178, 388);
-        ctx.lineTo(156, 392);
-        ctx.closePath();
-        ctx.fill();
-
-        // Приоткрытый рот и нижняя губа под усами
-        ctx.fillStyle = "#1a071c";
-        ctx.beginPath();
-        ctx.ellipse(204, 366, 16, 7, 0.12, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#9e3b68";
-        ctx.beginPath();
-        ctx.ellipse(203, 373, 14, 4, 0.12, 0, Math.PI);
-        ctx.fill();
-
-        // 5.9. Анатомическая кисть правой руки у виска (два пальца к виску, большой палец отведён)
-        const handGrad = ctx.createLinearGradient(280, 330, 375, 470);
-        handGrad.addColorStop(0, "#b54882");
-        handGrad.addColorStop(0.45, "#6c2463");
-        handGrad.addColorStop(1, "#2d0f33");
-        ctx.fillStyle = handGrad;
-
-        // Указательный и средний пальцы, упирающиеся в висок
-        ctx.beginPath();
-        ctx.moveTo(276, 334); // Кончики пальцев у виска
-        ctx.quadraticCurveTo(308, 335, 338, 358); // Верхняя грань указательного пальца
-        ctx.lineTo(368, 395); // Костяшки ладони
-        ctx.lineTo(384, 366); // Отведённый большой палец
-        ctx.lineTo(395, 374);
-        ctx.lineTo(378, 435); // Запястье
-        ctx.lineTo(324, 455);
-        ctx.quadraticCurveTo(315, 405, 295, 382); // Согнутые безымянный и мизинец
-        ctx.quadraticCurveTo(278, 360, 276, 334);
-        ctx.closePath();
-        ctx.fill();
-
-        // Световые грани на фалангах пальцев и манжета рубашки на запястье
-        ctx.strokeStyle = "#e87ea8";
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(280, 338);
-        ctx.lineTo(334, 362);
-        ctx.moveTo(284, 350);
-        ctx.lineTo(328, 374);
-        ctx.stroke();
-
-        // Светлая манжета на правом запястье (как на референсе image_542721)
-        ctx.fillStyle = "#8f5b8a";
-        ctx.beginPath();
-        ctx.moveTo(322, 452);
-        ctx.lineTo(380, 432);
-        ctx.lineTo(386, 448);
-        ctx.lineTo(326, 468);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.restore();
-      } else {
-        // ====================================================================
-        // СЦЕНА 2: «ХАРДКОР В ЦЕРКВИ // КИМ, ДОЛОРЕС ДЕЙ И ЛАЗЕРЫ» (image_54817e)
-        // ====================================================================
-        const bgGrad = ctx.createLinearGradient(0, 0, W, H);
-        bgGrad.addColorStop(0, "#15222e");
-        bgGrad.addColorStop(0.45, "#261d15");
-        bgGrad.addColorStop(1, "#0d1217");
-        ctx.fillStyle = bgGrad;
-        ctx.fillRect(0, 0, W, H);
-
-        // 1. Деревянные стропила и своды церкви Мартинеза на ВСЮ ширину окна (просвечивают под таблицей!)
-        ctx.save();
-        ctx.strokeStyle = "rgba(212, 163, 89, 0.14)";
-        ctx.lineWidth = 10;
-        for (let arch = 180; arch < W + 200; arch += 220) {
-          ctx.beginPath();
-          ctx.moveTo(arch, 0);
-          ctx.lineTo(arch - 260, H);
-          ctx.stroke();
-        }
-        ctx.restore();
-
-        // 2. Огромный золотой витраж Долорес Дей со светящимися лёгкими
-        ctx.save();
-        const vitrageGrad = ctx.createRadialGradient(270, 180, 15, 270, 220, 310);
-        vitrageGrad.addColorStop(0, "#fff3b0");
-        vitrageGrad.addColorStop(0.35, "#eab308");
-        vitrageGrad.addColorStop(0.7, "rgba(180, 110, 30, 0.35)");
-        vitrageGrad.addColorStop(1, "transparent");
-        ctx.fillStyle = vitrageGrad;
-        ctx.fillRect(0, 0, 680, 560);
-
-        // Силуэт Долорес Дей в витраже
-        ctx.fillStyle = "rgba(62, 44, 22, 0.75)";
-        ctx.beginPath();
-        ctx.arc(270, 88, 24, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.moveTo(215, 132);
-        ctx.lineTo(325, 132);
-        ctx.lineTo(350, 380);
-        ctx.lineTo(190, 380);
-        ctx.closePath();
-        ctx.fill();
-
-        // Светящиеся золотые лёгкие Долорес
-        ctx.fillStyle = "#fff8cc";
-        ctx.beginPath();
-        ctx.ellipse(253, 175, 15, 25, 0.18, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(287, 175, 15, 25, -0.18, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
-        // 3. Детальная фигура Кима Кицураги в оранжевом бомбере слева
-        ctx.save();
-        // Брюки карго
-        ctx.fillStyle = "#161a1d";
-        ctx.beginPath();
-        ctx.moveTo(65, 430);
-        ctx.lineTo(205, 425);
-        ctx.lineTo(238, H);
-        ctx.lineTo(82, H);
-        ctx.closePath();
-        ctx.fill();
-
-        // Оранжевый бомбер с проработанными складками и воротником
-        const jacketGrad = ctx.createLinearGradient(45, 210, 220, 430);
-        jacketGrad.addColorStop(0, "#ff6b1a");
-        jacketGrad.addColorStop(0.6, "#c8460e");
-        jacketGrad.addColorStop(1, "#6e2206");
-        ctx.fillStyle = jacketGrad;
-        ctx.beginPath();
-        ctx.moveTo(42, 245);
-        ctx.lineTo(182, 212);
-        ctx.lineTo(222, 338);
-        ctx.lineTo(175, 435);
-        ctx.lineTo(52, 415);
-        ctx.closePath();
-        ctx.fill();
-
-        // Белая футболка под расстёгнутым воротом
-        ctx.fillStyle = "#d8e2dc";
-        ctx.beginPath();
-        ctx.moveTo(92, 232);
-        ctx.lineTo(132, 228);
-        ctx.lineTo(148, 355);
-        ctx.lineTo(105, 355);
-        ctx.closePath();
-        ctx.fill();
-
-        // Нашивка РГМ на груди бомбера
-        ctx.strokeStyle = "#e0f2fe";
-        ctx.lineWidth = 2.2;
-        ctx.beginPath();
-        ctx.arc(158, 278, 12, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Голова Кима, скулы, очки с голубым отблеском лазера
-        ctx.fillStyle = "#d4966a";
-        ctx.beginPath();
-        ctx.moveTo(82, 162);
-        ctx.lineTo(132, 156);
-        ctx.lineTo(138, 212);
-        ctx.lineTo(112, 232);
-        ctx.lineTo(84, 216);
-        ctx.closePath();
-        ctx.fill();
-
-        // Причёска Кима
-        ctx.fillStyle = "#141416";
-        ctx.beginPath();
-        ctx.moveTo(78, 168);
-        ctx.quadraticCurveTo(105, 134, 136, 158);
-        ctx.lineTo(132, 172);
-        ctx.lineTo(82, 174);
-        ctx.closePath();
-        ctx.fill();
-
-        // Круглые очки Кима, отражающие лазерные лучи
-        ctx.fillStyle = "#a5f3fc";
-        ctx.strokeStyle = "#111";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(98, 188, 10, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(122, 184, 10, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
-
-        // 4. ГОЛУБЫЕ ЛАЗЕРНЫЕ ЛУЧИ, ПРОНЗАЮЩИЕ ВСЁ ОКНО НАСКВОЗЬ (и под таблицей S.M.A.R.T.)
-        ctx.save();
-        ctx.globalCompositeOperation = "screen";
-        const beams = [
-          { x1: 0, y1: 95, x2: W, y2: 460, w: 16 },
-          { x1: 80, y1: 0, x2: W, y2: 680, w: 9 },
-          { x1: 310, y1: 0, x2: 0, y2: 440, w: 8 },
-          { x1: 0, y1: 580, x2: W, y2: 240, w: 12 },
-          { x1: 220, y1: H, x2: W, y2: 120, w: 7 },
-        ];
-        beams.forEach((b, i) => {
-          const sway = Math.sin(t * 1.1 + i) * 5;
-          ctx.strokeStyle = "rgba(0, 229, 255, 0.28)";
-          ctx.lineWidth = b.w * 2.4;
-          ctx.beginPath();
-          ctx.moveTo(b.x1, b.y1 + sway);
-          ctx.lineTo(b.x2, b.y2 - sway);
-          ctx.stroke();
-
-          ctx.strokeStyle = "#9bf6ff";
-          ctx.lineWidth = b.w * 0.55;
-          ctx.beginPath();
-          ctx.moveTo(b.x1, b.y1 + sway);
-          ctx.lineTo(b.x2, b.y2 - sway);
-          ctx.stroke();
-        });
-        ctx.restore();
-      }
-
-      // Парящие живописные частицы по всему холсту
-      ctx.save();
-      motes.forEach((m, i) => {
-        const yPos = (m.y - frame * 0.25 + 820) % 820;
-        ctx.fillStyle = m.color;
-        ctx.globalAlpha = 0.28 + Math.sin(t + i) * 0.15;
-        ctx.fillRect(m.x, yPos, m.r * 2.2, m.r);
-      });
-      ctx.restore();
-
-      animId = requestAnimationFrame(render);
+    let seed =
+      themeId === "the_expression" ? 7712 : themeId === "dolores_pieta" ? 4913 : 9281;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
     };
 
-    render();
+    // Функция густого мазка щетинной кисти (рисует пучок волосков с рельефом краски)
+    const bristleStroke = (
+      x1: number,
+      y1: number,
+      x2: number,
+      y2: number,
+      thickness: number,
+      color: string,
+      alpha = 0.85,
+      highlightColor?: string
+    ) => {
+      octx.save();
+      const bristles = Math.max(3, Math.floor(thickness / 2.2));
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.max(1, Math.hypot(dx, dy));
+      const nx = -dy / len;
+      const ny = dx / len;
+
+      for (let b = 0; b < bristles; b++) {
+        const offset = ((b / (bristles - 1)) - 0.5) * thickness;
+        const jitter = (rand() - 0.5) * 3.5;
+        octx.globalAlpha = alpha * (0.65 + rand() * 0.35);
+        octx.strokeStyle = b === 0 && highlightColor ? highlightColor : color;
+        octx.lineWidth = Math.max(1.2, (thickness / bristles) * 1.45);
+        octx.lineCap = "round";
+        octx.beginPath();
+        octx.moveTo(x1 + nx * offset, y1 + ny * offset);
+        octx.quadraticCurveTo(
+          (x1 + x2) * 0.5 + nx * (offset + jitter),
+          (y1 + y2) * 0.5 + ny * (offset + jitter),
+          x2 + nx * offset,
+          y2 + ny * offset
+        );
+        octx.stroke();
+      }
+      octx.restore();
+    };
+
+    // Мазок мастихина (плоская фактурная плашка с рваным краем)
+    const knifeDab = (
+      cx: number,
+      cy: number,
+      w: number,
+      h: number,
+      angle: number,
+      color: string,
+      alpha = 0.88
+    ) => {
+      octx.save();
+      octx.translate(cx, cy);
+      octx.rotate(angle);
+      octx.globalAlpha = alpha;
+      octx.fillStyle = color;
+      octx.beginPath();
+      octx.moveTo(-w * 0.5, -h * 0.45);
+      octx.lineTo(w * 0.52, -h * 0.5);
+      octx.lineTo(w * 0.46, h * 0.52);
+      octx.lineTo(-w * 0.48, h * 0.46);
+      octx.closePath();
+      octx.fill();
+      octx.restore();
+    };
+
+    if (themeId === "the_expression") {
+      // ======================================================================
+      // СЦЕНА I: «УХМЫЛКА КУСТО / THE EXPRESSION» (по референсу image_622444)
+      // ======================================================================
+
+      // 1. Фон на всё окно: тёмно-оливковый и бирюзово-янтарный кабинет справа + светлый ореол слева
+      const bg = octx.createLinearGradient(0, 0, W, H);
+      bg.addColorStop(0, "#1f302b");
+      bg.addColorStop(0.35, "#192421");
+      bg.addColorStop(0.75, "#121716");
+      bg.addColorStop(1, "#0b0e0d");
+      octx.fillStyle = bg;
+      octx.fillRect(0, 0, W, H);
+
+      // 2. Широкие диагональные мазки мастихином позади головы (охра, горчичный, бирюза и кремовый свет)
+      bristleStroke(-20, 210, 240, -30, 95, "#d89228", 0.92, "#f2b84b");
+      bristleStroke(120, 290, 420, -20, 88, "#357873", 0.82, "#5cb5ad");
+      bristleStroke(240, 420, 560, 80, 92, "#c97a22", 0.78, "#eab354");
+      bristleStroke(340, 620, 880, 120, 140, "#182c29", 0.55);
+      bristleStroke(520, 740, 1180, 180, 160, "#241b14", 0.45);
+
+      // 3. Яркий кремово-пергаментный ореол мастихином вокруг головы Гарри (как на image_622444)
+      const haloSpots = [
+        [195, 225, 235, 260, -0.25],
+        [155, 265, 210, 240, 0.18],
+        [245, 275, 210, 250, -0.4],
+        [195, 360, 240, 210, 0.08],
+      ];
+      haloSpots.forEach(([x, y, w, h, a]) => {
+        knifeDab(x, y, w, h, a, "#e8ebd5", 0.94);
+      });
+      // Жёлто-охристые диагональные прочерки по углам ореола
+      bristleStroke(10, 125, 165, -10, 48, "#d98a26", 0.94, "#f4b942");
+      bristleStroke(295, 290, 415, 165, 54, "#d98a26", 0.9, "#f4b942");
+
+      // 4. Оливково-зелёный диско-пиджак Гарри с широкими лацканами
+      bristleStroke(65, 505, 18, 820, 115, "#2b3d1c", 0.98, "#435c2d");
+      bristleStroke(135, 495, 110, 820, 110, "#384f25", 0.98, "#516e38");
+      bristleStroke(265, 515, 365, 820, 125, "#233315", 0.98, "#384f25");
+      bristleStroke(235, 540, 275, 820, 95, "#19260f", 0.96);
+
+      // Белая рубашка с огромным острым диско-воротником 70-х поверх пиджака
+      octx.save();
+      octx.fillStyle = "#cfd6cc";
+      octx.beginPath();
+      octx.moveTo(138, 452);
+      octx.lineTo(104, 628); // Острый левый конец воротника
+      octx.lineTo(165, 558);
+      octx.lineTo(175, 800);
+      octx.lineTo(228, 800);
+      octx.lineTo(234, 565);
+      octx.lineTo(286, 615); // Острый правый конец воротника
+      octx.lineTo(246, 468);
+      octx.closePath();
+      octx.fill();
+
+      // Серо-оливковые тени на воротнике и рубашке
+      bristleStroke(148, 520, 168, 760, 28, "#8c968b", 0.85);
+      bristleStroke(222, 525, 214, 760, 28, "#737d72", 0.85);
+
+      // Ужасающий галстук (зелёно-горчично-терракотовый узор)
+      bristleStroke(194, 535, 198, 790, 34, "#3f4f22", 0.96);
+      knifeDab(196, 585, 24, 34, 0.25, "#c98324", 0.95);
+      knifeDab(198, 645, 26, 32, -0.3, "#b84a28", 0.92);
+      knifeDab(195, 705, 24, 36, 0.15, "#d49b35", 0.92);
+      octx.restore();
+
+      // 5. Подбородок и шея в серо-пепельной тени (как на референсе image_622444)
+      knifeDab(195, 455, 88, 70, 0.05, "#6b6a65", 0.96);
+      knifeDab(196, 432, 76, 46, -0.04, "#8c8b85", 0.96);
+      knifeDab(202, 444, 48, 28, 0.1, "#aba9a2", 0.9);
+
+      // 6. Основа лица — пастозная лепка мастихином
+      // Серо-телесная теневая сторона слева и тёплая розовато-охристая справа
+      knifeDab(162, 275, 85, 145, -0.08, "#b5a69b", 0.96);
+      knifeDab(228, 285, 88, 145, 0.08, "#c99782", 0.96);
+      knifeDab(198, 245, 125, 95, -0.02, "#d8cfc4", 0.96);
+
+      // Знаменитый яркий чисто-белый блик мастихином посреди лба (визитная карточка портрета Гарри)
+      knifeDab(192, 222, 48, 62, -0.32, "#f7f9f4", 0.98);
+      knifeDab(208, 248, 56, 34, 0.15, "#f7f9f4", 0.96);
+
+      // Правое ухо (для зрителя слева) в тёплом красновато-коричневом рефлексе
+      knifeDab(106, 298, 28, 64, -0.12, "#8f3f34", 0.95);
+      knifeDab(108, 302, 16, 42, -0.12, "#592019", 0.92);
+
+      // 7. Похмельный багрово-терракотовый румянец вокруг глаз, на переносице и кончике носа
+      const redZones = [
+        [168, 305, 58, 38, 0.12, "#9e3b2e"], // Левая глазница и мешок под глазом
+        [242, 315, 54, 38, -0.15, "#8c2f23"], // Правая глазница
+        [205, 338, 44, 48, 0.05, "#b84635"], // Нос
+        [152, 342, 48, 42, -0.2, "#c77d6b"], // Левая скула
+        [248, 352, 42, 42, 0.2, "#9e4738"], // Правая скула
+      ];
+      redZones.forEach(([x, y, w, h, a, col]) => {
+        knifeDab(x as number, y as number, w as number, h as number, a as number, col as string, 0.88);
+      });
+
+      // Светлый мазок на спинке и кончике носа
+      knifeDab(206, 318, 16, 38, 0.08, "#e3b8a6", 0.92);
+      knifeDab(198, 342, 18, 14, 0, "#d96b59", 0.94);
+
+      // 8. Прищуренные уставшие глаза с тёмными веками и крошечными живыми бликами
+      // Левый глаз (приподнят в ироничном прищуре)
+      bristleStroke(142, 276, 192, 286, 9, "#36221c", 0.95); // Бровь
+      knifeDab(168, 302, 36, 16, 0.12, "#4a1c17", 0.95);
+      knifeDab(168, 301, 22, 7, 0.12, "#1a0d0b", 0.98);
+      knifeDab(164, 301, 5, 4, 0, "#e2dcd5", 0.92); // Белок/блик
+
+      // Правый глаз (сильнее затенён и прищурен)
+      bristleStroke(222, 292, 266, 286, 10, "#2b1a15", 0.95); // Бровь
+      knifeDab(242, 312, 34, 16, -0.1, "#3d1612", 0.95);
+      knifeDab(240, 312, 20, 7, -0.1, "#140908", 0.98);
+      knifeDab(242, 312, 4, 4, 0, "#d8c8be", 0.9);
+
+      // Мешки и морщины под глазами и на лбу тонкой кистью
+      octx.strokeStyle = "#3d221c";
+      octx.lineWidth = 2;
+      octx.beginPath();
+      octx.moveTo(148, 312);
+      octx.quadraticCurveTo(168, 322, 188, 312);
+      octx.moveTo(224, 320);
+      octx.quadraticCurveTo(242, 328, 258, 318);
+      // Морщины на лбу
+      octx.moveTo(168, 232);
+      octx.quadraticCurveTo(205, 245, 248, 236);
+      octx.moveTo(175, 248);
+      octx.quadraticCurveTo(212, 258, 244, 252);
+      octx.stroke();
+
+      // 9. Знаменитые густые бакенбарды и усы Кусто, переходящие друг в друга
+      // Левая бакенбарда
+      for (let i = 0; i < 18; i++) {
+        bristleStroke(
+          112 + (i % 4) * 8,
+          295 + i * 5,
+          96 + (i % 5) * 10,
+          365 + i * 4,
+          14,
+          i % 3 === 0 ? "#3d251b" : "#1f130e",
+          0.94,
+          "#59382b"
+        );
+      }
+      // Правая бакенбарда
+      for (let i = 0; i < 16; i++) {
+        bristleStroke(
+          262 + (i % 3) * 6,
+          315 + i * 5,
+          278 - (i % 4) * 6,
+          378 + i * 4,
+          14,
+          i % 3 === 0 ? "#331e16" : "#170e0a",
+          0.94
+        );
+      }
+      // Густые нависающие усы
+      bristleStroke(132, 385, 198, 362, 28, "#291811", 0.96, "#4d2f22");
+      bristleStroke(198, 362, 258, 392, 26, "#1f120d", 0.96, "#3d241a");
+      bristleStroke(145, 396, 185, 375, 22, "#382118", 0.95);
+
+      // 10. Кривая зубастая ухмылка «Выражения» (The Expression)
+      octx.save();
+      octx.fillStyle = "#170b09";
+      octx.beginPath();
+      octx.moveTo(164, 386);
+      octx.quadraticCurveTo(198, 412, 232, 394);
+      octx.quadraticCurveTo(198, 426, 164, 386);
+      octx.closePath();
+      octx.fill();
+
+      // Белый ряд зубов в ухмылке и розовая нижняя губа
+      bristleStroke(172, 392, 218, 398, 8, "#e8e4dc", 0.95);
+      bristleStroke(176, 405, 216, 409, 9, "#c46b5e", 0.92, "#e08e82");
+      octx.restore();
+
+      // 11. Растрёпанная шевелюра сверху с выбивающимися прядями на лоб
+      for (let h = 0; h < 28; h++) {
+        const hx = 115 + (h / 28) * 165;
+        const hy = 185 - Math.sin((h / 28) * Math.PI) * 38 + (rand() - 0.5) * 18;
+        bristleStroke(
+          hx,
+          hy + 35,
+          hx + (rand() - 0.3) * 45,
+          hy - 22,
+          16,
+          h % 4 === 0 ? "#42342f" : h % 2 === 0 ? "#261d1a" : "#17110f",
+          0.94,
+          "#5c4942"
+        );
+      }
+      // Тонкие графичные волоски, падающие на белый блик лба
+      octx.strokeStyle = "#1c1513";
+      octx.lineWidth = 2.2;
+      octx.beginPath();
+      octx.moveTo(215, 182);
+      octx.quadraticCurveTo(238, 218, 218, 242);
+      octx.moveTo(232, 188);
+      octx.quadraticCurveTo(252, 225, 235, 252);
+      octx.moveTo(265, 212);
+      octx.quadraticCurveTo(302, 218, 315, 235);
+      octx.stroke();
+    } else if (themeId === "dolores_pieta") {
+      // ======================================================================
+      // СЦЕНА II: «ПЬЕТА ДОЛОРЕС / СВЕТЯЩИЕСЯ ЛЁГКИЕ» (по референсу image_62245f)
+      // ======================================================================
+
+      // 1. Глубокий ночной фон с берлинской лазурью, кармином и золотым сиянием
+      const bg = octx.createLinearGradient(0, 0, W, H);
+      bg.addColorStop(0, "#1d283a");
+      bg.addColorStop(0.35, "#1a1423");
+      bg.addColorStop(0.75, "#0d0b14");
+      bg.addColorStop(1, "#06050a");
+      octx.fillStyle = bg;
+      octx.fillRect(0, 0, W, H);
+
+      // Живописные облака кармина и охры в верхней части холста
+      for (let i = 0; i < 45; i++) {
+        const cx = rand() * 680;
+        const cy = rand() * 440;
+        const col =
+          i % 3 === 0 ? "#7a1c24" : i % 3 === 1 ? "#2b4162" : "#8f5b28";
+        knifeDab(cx, cy, 65 + rand() * 80, 45 + rand() * 60, rand() * Math.PI, col, 0.38);
+      }
+
+      // 2. Сияющий ореол золотых лёгких Долорес Дей
+      const lungGlow = octx.createRadialGradient(225, 185, 10, 225, 185, 240);
+      lungGlow.addColorStop(0, "rgba(255, 250, 205, 0.98)");
+      lungGlow.addColorStop(0.3, "rgba(245, 158, 11, 0.72)");
+      lungGlow.addColorStop(0.65, "rgba(185, 28, 28, 0.32)");
+      lungGlow.addColorStop(1, "transparent");
+      octx.fillStyle = lungGlow;
+      octx.fillRect(0, 0, 580, 480);
+
+      // Фигура и склонённый лик Долорес Дей вверху
+      bristleStroke(145, 95, 315, 115, 95, "#6e3b32", 0.75, "#b86b52");
+      knifeDab(245, 58, 68, 78, 0.25, "#c98a63", 0.92);
+      knifeDab(235, 68, 48, 52, 0.25, "#e6b891", 0.92);
+      // Прикрытые веки и мягкая полуулыбка Долорес
+      bristleStroke(218, 56, 238, 62, 4, "#4a2518", 0.9);
+      bristleStroke(252, 64, 268, 66, 4, "#4a2518", 0.9);
+      bristleStroke(222, 86, 242, 89, 4, "#5c2c1d", 0.9);
+
+      // 3. Два светящихся золотых лёгких с бронхиальным деревом
+      octx.save();
+      // Левое и правое лёгкое
+      knifeDab(192, 182, 54, 88, 0.18, "#fde68a", 0.96);
+      knifeDab(248, 186, 54, 88, -0.18, "#fde68a", 0.96);
+      knifeDab(194, 182, 38, 68, 0.18, "#fffbeb", 0.95);
+      knifeDab(246, 186, 38, 68, -0.18, "#fffbeb", 0.95);
+
+      // Трахея и ветвящиеся бронхи внутри лёгких
+      octx.strokeStyle = "#f59e0b";
+      octx.lineWidth = 2.2;
+      octx.beginPath();
+      octx.moveTo(222, 118);
+      octx.lineTo(220, 155);
+      octx.lineTo(192, 178);
+      octx.moveTo(220, 155);
+      octx.lineTo(248, 182);
+      octx.stroke();
+
+      // Тонкие золотые лучи вокруг лёгких
+      octx.strokeStyle = "rgba(254, 240, 138, 0.45)";
+      octx.lineWidth = 1.2;
+      for (let a = 0; a < Math.PI * 2; a += 0.22) {
+        octx.beginPath();
+        octx.moveTo(220 + Math.cos(a) * 52, 184 + Math.sin(a) * 52);
+        octx.lineTo(220 + Math.cos(a) * 92, 184 + Math.sin(a) * 92);
+        octx.stroke();
+      }
+      octx.restore();
+
+      // 4. Кроваво-багровые потёки масляной краски слева (как на референсе image_62245f)
+      for (let d = 0; d < 32; d++) {
+        const dx = 18 + d * 5.2;
+        const dyStart = 290 + (rand() - 0.5) * 80;
+        const dyEnd = 520 + rand() * 290;
+        bristleStroke(
+          dx,
+          dyStart,
+          dx + (rand() - 0.5) * 4,
+          dyEnd,
+          3 + rand() * 5,
+          d % 3 === 0 ? "#dc2626" : d % 2 === 0 ? "#991b1b" : "#450a0a",
+          0.88,
+          "#ef4444"
+        );
+      }
+
+      // 5. Павший детектив (голова запрокинута на грудь Долорес, спина и рука в синих тенях)
+      // Голова Гарри в профиль (освещена сверху золотом лёгких, снизу в синей тени)
+      knifeDab(125, 265, 86, 68, -0.35, "#3b4254", 0.95);
+      knifeDab(148, 248, 66, 46, -0.35, "#d6a889", 0.94);
+      knifeDab(168, 242, 42, 28, -0.25, "#fce7d2", 0.95); // Золотой свет на подбородке и щеке
+      bristleStroke(85, 255, 138, 315, 38, "#1e2433", 0.96); // Волосы и борода в тени
+
+      // Обнажённый торс, плечо и опущенная рука (контраст золотого света на груди и лазурной тени на спине)
+      bristleStroke(185, 295, 335, 385, 68, "#e2c099", 0.94, "#fef3c7"); // Освещённая грудь и живот
+      bristleStroke(152, 335, 285, 445, 75, "#3b5978", 0.95, "#6488a8"); // Переход в полутень
+      bristleStroke(135, 355, 225, 545, 62, "#1e3a5f", 0.96, "#3b628f"); // Плечо и предплечье в синей тени
+      bristleStroke(215, 535, 325, 695, 46, "#0f1e36", 0.98); // Кисть руки внизу
+    } else {
+      // ======================================================================
+      // СЦЕНА III: «ПСИХОЗ B' B'' / ВЗРЫВ СОЗНАНИЯ» (живописная версия image_542721)
+      // ======================================================================
+      const bg = octx.createRadialGradient(210, 310, 30, 540, 410, 960);
+      bg.addColorStop(0, "#2b0d38");
+      bg.addColorStop(0.4, "#120921");
+      bg.addColorStop(1, "#06040a");
+      octx.fillStyle = bg;
+      octx.fillRect(0, 0, W, H);
+
+      const ox = 212;
+      const oy = 315;
+
+      // Веер живописных мазков взрыва из виска
+      const colors = ["#ff0a6c", "#ff4800", "#ffb703", "#00e5ff", "#7209b7", "#f72585"];
+      for (let i = 0; i < 125; i++) {
+        const ang = -Math.PI * 0.84 + (i / 125) * (Math.PI * 0.78);
+        const len = 95 + ((i * 83) % 440);
+        bristleStroke(
+          ox,
+          oy,
+          ox + Math.cos(ang) * len,
+          oy + Math.sin(ang) * len,
+          10 + (i % 5) * 4,
+          colors[i % colors.length],
+          0.78,
+          "#fff5e4"
+        );
+      }
+
+      // Меловые дуги B', B'', B'''
+      octx.strokeStyle = "rgba(186, 230, 253, 0.38)";
+      octx.lineWidth = 1.8;
+      [0, 1, 2].forEach((k) => {
+        octx.beginPath();
+        octx.moveTo(ox, oy);
+        octx.bezierCurveTo(ox + 120, 140 - k * 35, 520, 75 + k * 45, W - 40, 35 + k * 85);
+        octx.stroke();
+      });
+      octx.font = "italic 700 24px 'Cormorant Garamond', Georgia, serif";
+      octx.fillStyle = "rgba(224, 242, 254, 0.78)";
+      octx.fillText("B'", 288, 145);
+      octx.fillText("B''", 358, 86);
+      octx.fillText("B'''", 342, 196);
+
+      // Живописный портрет Гарри с запрокинутой головой и рукой у виска (мазками кисти)
+      bristleStroke(60, 520, 30, 820, 120, "#1b0d26", 0.98);
+      bristleStroke(160, 460, 320, 820, 140, "#14091d", 0.98);
+      bristleStroke(165, 390, 210, 510, 68, "#5e225c", 0.95, "#e06d94"); // Шея
+      knifeDab(220, 338, 125, 115, 0.15, "#8a3472", 0.96); // Голова
+      knifeDab(208, 305, 82, 65, -0.1, "#f794a4", 0.94); // Розовый свет на лбу и щеке
+      knifeDab(186, 308, 22, 12, -0.2, "#ffe5ec", 0.96); // Левый глаз
+      knifeDab(242, 318, 22, 12, 0.2, "#ffd6e0", 0.96); // Правый глаз
+      bristleStroke(152, 362, 268, 385, 36, "#260d29", 0.96); // Усы и бакенбарды
+      bristleStroke(282, 338, 355, 425, 42, "#752c68", 0.95, "#d96b98"); // Рука у виска
+    }
+
+    // Тонкая сетка кракелюра и зерна холста поверх всей картины
+    octx.save();
+    octx.strokeStyle = "rgba(255, 248, 231, 0.03)";
+    octx.lineWidth = 1;
+    for (let x = 0; x < W; x += 6) {
+      octx.beginPath();
+      octx.moveTo(x, 0);
+      octx.lineTo(x, H);
+      octx.stroke();
+    }
+    octx.restore();
+
+    // Лёгкий анимационный цикл для живого дыхания света и пылинок
+    let animId: number;
+    let frame = 0;
+    const animate = () => {
+      frame += 1;
+      ctx.drawImage(offscreen, 0, 0);
+
+      // Мягкая пульсация света и редкие парящие искры памяти
+      const pulse = 0.04 + Math.sin(frame * 0.025) * 0.025;
+      ctx.fillStyle =
+        health === "BAD"
+          ? `rgba(220, 38, 38, ${pulse * 1.5})`
+          : `rgba(245, 158, 11, ${pulse})`;
+      ctx.fillRect(0, 0, 420, H);
+
+      animId = requestAnimationFrame(animate);
+    };
+
+    animate();
     return () => cancelAnimationFrame(animId);
   }, [themeId, customUrl, health, temp]);
 
   if (customUrl) {
     return (
       <div style={{ width: "100%", height: "100%", position: "relative", overflow: "hidden" }}>
-        {/* Размытая панорамная подложка на всё окно справа */}
         <img
           src={customUrl}
           alt=""
@@ -768,11 +637,10 @@ ctx.fill();
             width: "100%",
             height: "100%",
             objectFit: "cover",
-            filter: "blur(28px) saturate(1.5) brightness(0.45)",
+            filter: "blur(28px) saturate(1.4) brightness(0.42)",
             transform: "scale(1.08)",
           }}
         />
-        {/* Чёткий полноростовой арт в левой витрине с плавным растворением края */}
         <img
           src={customUrl}
           alt="Custom Artwork"
@@ -780,7 +648,7 @@ ctx.fill();
             position: "absolute",
             left: 0,
             top: 0,
-            width: "440px",
+            width: "430px",
             height: "100%",
             objectFit: "cover",
             objectPosition: "center top",
@@ -824,6 +692,7 @@ const INITIAL_DRIVES: DriveProfile[] = [
     transferMode: "PCIe 4.0 x4 | PCIe 4.0 x4",
     standard: "NVM Express 1.4",
     features: "S.M.A.R.T., TRIM, VolatileWriteCache",
+    nandEndurance: "96% (V-NAND 3-bit MLC)",
     healthStatus: "GOOD",
     healthPercent: 96,
     temperature: 41,
@@ -1018,6 +887,7 @@ const INITIAL_DRIVES: DriveProfile[] = [
     transferMode: "SATA/600 | SATA/600",
     standard: "ACS-3 | ATA8-ACS",
     features: "S.M.A.R.T., NCQ, GPL",
+    nandEndurance: "Магнитный CMR (2 пластины)",
     healthStatus: "CAUTION",
     healthPercent: 58,
     temperature: 52,
@@ -1102,6 +972,7 @@ const INITIAL_DRIVES: DriveProfile[] = [
     transferMode: "SATA/150 | SATA/600 (Деградация)",
     standard: "ATA8-ACS",
     features: "S.M.A.R.T. (АВАРИЯ)",
+    nandEndurance: "Крах G-List (Осыпание слоя)",
     healthStatus: "BAD",
     healthPercent: 11,
     temperature: 63,
@@ -1238,7 +1109,7 @@ function parseRealSmartReport(rawText: string): DriveProfile | null {
   return {
     id: `real_${Date.now()}`,
     letter: "R:",
-    name: `РЕАЛЬНЫЙ ДИСК ПК`,
+    name: "РЕАЛЬНЫЙ ДИСК ПК",
     model,
     capacityGB: 1000.0,
     firmware,
@@ -1247,6 +1118,7 @@ function parseRealSmartReport(rawText: string): DriveProfile | null {
     transferMode,
     standard: "Аппаратный S.M.A.R.T.",
     features: "S.M.A.R.T., Телеметрия ядра",
+    nandEndurance: `${healthPercent}% (Аппаратный отчёт)`,
     healthStatus,
     healthPercent,
     temperature,
@@ -1267,34 +1139,33 @@ function parseRealSmartReport(rawText: string): DriveProfile | null {
 export default function CrystalDiskElysiumEdition() {
   const [drives, setDrives] = useState<DriveProfile[]>(INITIAL_DRIVES);
   const [activeDriveIdx, setActiveDriveIdx] = useState<number>(0);
-  const [visualTheme, setVisualTheme] = useState<VisualThemeId>("mind_explosion");
+  const [visualTheme, setVisualTheme] = useState<VisualThemeId>("the_expression");
   const [customArt1, setCustomArt1] = useState<string | null>(null);
   const [customArt2, setCustomArt2] = useState<string | null>(null);
 
   const [rawFormat, setRawFormat] = useState<"HEX16" | "DEC10">("HEX16");
   const [selectedAttrId, setSelectedAttrId] = useState<string>("01");
-  const [tempOffset, setTempOffset] = useState<number>(0);
   const [soundOn, setSoundOn] = useState<boolean>(true);
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
 
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [importText, setImportText] = useState<string>("");
-  const [lastDice, setLastDice] = useState<[number, number]>([4, 5]);
+  const [lastDice, setLastDice] = useState<[number, number]>([5, 6]);
 
   const [thoughts, setThoughts] = useState<DialogueMessage[]>([
     {
       id: "init_1",
-      skill: "КОНЦЕПТУАЛИЗАЦИЯ",
-      category: "INT",
-      difficulty: "Сложно: Успех",
-      text: "Из твоего виска вырывается протуберанец неоновой фуксии, кадмия и ультрафиолета. Первая производная памяти B', вторая производная распада B''... Перед тобой — кремниевая душа машины.",
-    },
-    {
-      id: "init_2",
       skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
       category: "PSY",
       difficulty: "Средне: Успех",
-      text: "Выбери любой регистр в стеклянной ведомости справа или нажми на кости Белой проверки в центре паспорта, чтобы услышать, о чём шепчет контроллер.",
+      text: "Кремний помнит всё, Гарри. Нажми на любую строчку S.M.A.R.T. справа или брось кости Белой проверки в центре паспорта.",
+    },
+    {
+      id: "init_2",
+      skill: "ЭЛЕКТРОХИМИЯ",
+      category: "FYS",
+      difficulty: "Легко: Успех",
+      text: "Посмотри на эту ухмылку в зеркале монитора! Четыре линии PCIe 4.0 гонят чистый дофамин со скоростью семь гигабайт в секунду!",
     },
   ]);
 
@@ -1330,13 +1201,8 @@ export default function CrystalDiskElysiumEdition() {
   }, []);
 
   const activeDrive = drives[activeDriveIdx] || drives[0];
-  const effectiveTemp = activeDrive.temperature + tempOffset;
-
-  const effectiveHealth: HealthState = useMemo(() => {
-    if (activeDrive.healthStatus === "BAD" || effectiveTemp >= 60) return "BAD";
-    if (activeDrive.healthStatus === "CAUTION" || effectiveTemp >= 50) return "CAUTION";
-    return "GOOD";
-  }, [activeDrive.healthStatus, effectiveTemp]);
+  const effectiveTemp = activeDrive.temperature;
+  const effectiveHealth = activeDrive.healthStatus;
 
   const handleArtFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -1374,7 +1240,7 @@ export default function CrystalDiskElysiumEdition() {
       : null;
 
   const cycleTheme = () => {
-    const order: VisualThemeId[] = ["mind_explosion", "church_lasers"];
+    const order: VisualThemeId[] = ["the_expression", "dolores_pieta", "mind_explosion"];
     if (customArt1) order.push("custom_1");
     if (customArt2) order.push("custom_2");
     const nextIdx = (order.indexOf(visualTheme) + 1) % order.length;
@@ -1385,8 +1251,11 @@ export default function CrystalDiskElysiumEdition() {
   const handleSelectDrive = (idx: number) => {
     const drv = drives[idx];
     setActiveDriveIdx(idx);
-    setTempOffset(0);
     soundFX.playClick(drv.healthStatus);
+
+    if (drv.healthStatus === "BAD") setVisualTheme("dolores_pieta");
+    else if (drv.healthStatus === "CAUTION") setVisualTheme("mind_explosion");
+    else setVisualTheme("the_expression");
 
     setThoughts([
       {
@@ -1436,17 +1305,8 @@ export default function CrystalDiskElysiumEdition() {
         category: "MOT",
         difficulty: success ? "КРИТИЧЕСКИЙ УСПЕХ" : "ПРОВАЛ ПРОВЕРКИ",
         text: success
-          ? "Твой разум пробивает оболочку операционной системы и ныряет прямо в микрокод контроллера! Ты видишь карту физических блоков как ночной Ревашоль с высоты птичьего полёта: все уязвимые сектора помечены и изолированы."
-          : "Перед глазами взрываются пурпурно-золотые пятна. Ты забыл, что такое LBA-адресация, почему ты сидишь перед этим монитором и как зовут того парня в оранжевой куртке.",
-      },
-      {
-        id: `r2_${Date.now()}`,
-        skill: "УЖАСАЮЩИЙ ГАЛСТУК",
-        category: "TIE",
-        difficulty: "Безумно: Успех",
-        text: success
-          ? "ДА-А-А, БРАТАН! Семь тысяч мегабайт в секунду чистого электрического экстаза!"
-          : "Забей на сектора, Гарри! Давай просто разгоним этот чип до 85 градусов и посмотрим, как красиво он задымится!",
+          ? "Твой разум пробивает оболочку операционной системы и ныряет прямо в микрокод контроллера! Карта физических блоков открывается как ночной Ревашоль: все уязвимые сектора помечены."
+          : "Перед глазами плывут масляные круги. Ты забыл, что такое LBA-адресация, почему ты сидишь перед этим монитором и зачем нацепил этот галстук.",
       },
     ]);
   };
@@ -1489,11 +1349,11 @@ export default function CrystalDiskElysiumEdition() {
       case "PSY":
         return "#c77dff";
       case "FYS":
-        return "#ff2a85";
+        return "#ff4d6d";
       case "MOT":
-        return "#ffbe0b";
+        return "#f4b942";
       case "TIE":
-        return "#ff5400";
+        return "#ff6b1a";
       default:
         return "#f8f9fa";
     }
@@ -1518,16 +1378,27 @@ export default function CrystalDiskElysiumEdition() {
         handleArtFiles(e.dataTransfer.files);
       }}
     >
+      {/* ПОЛНЫЙ ЗАПРЕТ БЕЛЫХ СИСТЕМНЫХ СКРОЛЛБАРОВ WINDOWS + СТИЛИ КАРТИНЫ */}
       <style
         dangerouslySetInnerHTML={{
           __html: `
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,500;1,600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Oswald:wght@500;600;700&display=swap');
 
-        * { box-sizing: border-box; }
+        * {
+          box-sizing: border-box;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        *::-webkit-scrollbar {
+          width: 0px !important;
+          height: 0px !important;
+          display: none !important;
+          background: transparent !important;
+        }
         body, html {
           margin: 0;
           padding: 0;
-          background: #06050a;
+          background: #070908;
           color: #f3eee6;
           font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
           font-size: 13px;
@@ -1553,12 +1424,11 @@ export default function CrystalDiskElysiumEdition() {
           justify-content: center;
           padding: 18px;
           background:
-            radial-gradient(circle at 20% 20%, rgba(114, 9, 183, 0.18), transparent 50%),
-            radial-gradient(circle at 80% 80%, rgba(255, 72, 0, 0.12), transparent 50%),
-            #050408;
+            radial-gradient(circle at 25% 25%, rgba(53, 120, 115, 0.16), transparent 50%),
+            radial-gradient(circle at 80% 80%, rgba(216, 146, 40, 0.12), transparent 50%),
+            #060807;
         }
 
-        /* НАТИВНОЕ ОКНО ПРИЛОЖЕНИЯ CRYSTALDISKINFO (С ПОЛНОЭКРАННЫМ ХОЛСТОМ ВНУТРИ) */
         .cdi-native-frame {
           width: 100%;
           max-width: 1260px;
@@ -1567,14 +1437,13 @@ export default function CrystalDiskElysiumEdition() {
           overflow: hidden;
           display: flex;
           flex-direction: column;
-          border: 1px solid rgba(226, 212, 190, 0.28);
+          border: 1px solid rgba(216, 185, 138, 0.32);
           box-shadow:
             0 30px 90px rgba(0, 0, 0, 0.95),
-            0 0 1px 1px rgba(0, 0, 0, 0.8);
-          background: #0b0813;
+            0 0 1px 1px rgba(0, 0, 0, 0.85);
+          background: #0c100e;
         }
 
-        /* Полноэкранный живописный холст на ВСЁ окно */
         .masterpiece-bg-layer {
           position: absolute;
           inset: 0;
@@ -1582,24 +1451,22 @@ export default function CrystalDiskElysiumEdition() {
           pointer-events: none;
         }
 
-        /* Тонкая текстура холста и виньетка */
         .canvas-grain-overlay {
           position: absolute;
           inset: 0;
           z-index: 1;
           pointer-events: none;
           background:
-            radial-gradient(circle at 22% 45%, transparent 35%, rgba(8, 6, 15, 0.58) 100%),
-            repeating-linear-gradient(0deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 3px);
+            radial-gradient(circle at 22% 45%, transparent 38%, rgba(8, 10, 9, 0.55) 100%),
+            repeating-linear-gradient(0deg, rgba(255,255,255,0.01) 0px, rgba(255,255,255,0.01) 1px, transparent 1px, transparent 3px);
         }
 
-        /* 1. АУТЕНТИЧНАЯ СТРОКА ЗАГОЛОВКА И МЕНЮ (БЕЗ ДЕШЁВЫХ ТАБЛЕТОК И ЭМОДЗИ) */
         .native-titlebar {
           position: relative;
           z-index: 20;
           height: 30px;
-          background: rgba(11, 8, 19, 0.92);
-          border-bottom: 1px solid rgba(226, 212, 190, 0.14);
+          background: rgba(11, 14, 13, 0.92);
+          border-bottom: 1px solid rgba(216, 185, 138, 0.16);
           padding: 0 14px;
           display: flex;
           align-items: center;
@@ -1615,17 +1482,19 @@ export default function CrystalDiskElysiumEdition() {
           color: #9c9286;
           font-size: 13px;
         }
+
         .native-menubar {
           position: relative;
           z-index: 20;
-          height: 29px;
-          background: rgba(18, 14, 28, 0.86);
+          height: 30px;
+          background: rgba(17, 22, 20, 0.88);
           backdrop-filter: blur(10px);
-          border-bottom: 1px solid rgba(226, 212, 190, 0.2);
+          border-bottom: 1px solid rgba(216, 185, 138, 0.22);
           padding: 0 10px;
           display: flex;
           align-items: center;
           justify-content: space-between;
+          flex-wrap: wrap;
         }
         .menu-items-left {
           display: flex;
@@ -1642,8 +1511,8 @@ export default function CrystalDiskElysiumEdition() {
           transition: background 0.12s, border-color 0.12s;
         }
         .classic-menu-item:hover {
-          background: rgba(255, 183, 3, 0.16);
-          border-color: rgba(255, 183, 3, 0.45);
+          background: rgba(216, 146, 40, 0.2);
+          border-color: rgba(216, 146, 40, 0.5);
           color: #fff;
         }
         .scene-switcher-bar {
@@ -1653,7 +1522,7 @@ export default function CrystalDiskElysiumEdition() {
         }
         .scene-tab-btn {
           background: rgba(255, 255, 255, 0.04);
-          border: 1px solid rgba(226, 212, 190, 0.2);
+          border: 1px solid rgba(216, 185, 138, 0.22);
           color: #cbbba0;
           padding: 2px 9px;
           font-size: 11px;
@@ -1661,18 +1530,17 @@ export default function CrystalDiskElysiumEdition() {
           transition: all 0.12s;
         }
         .scene-tab-btn.active, .scene-tab-btn:hover {
-          background: rgba(255, 10, 108, 0.28);
-          border-color: #ffb703;
+          background: rgba(216, 146, 40, 0.32);
+          border-color: #f4b942;
           color: #fff;
         }
 
-        /* 2. ОСНОВНАЯ СЕТКА (СЛЕВА — ОТКРЫТЫЙ ХОЛСТ С ПОРТРЕТОМ, СПРАВА — ПОЛУПРОЗРАЧНЫЙ СТЕНД CDI) */
         .cdi-workspace {
           position: relative;
           z-index: 10;
           flex: 1;
           display: grid;
-          grid-template-columns: 390px 1fr;
+          grid-template-columns: 395px 1fr;
         }
         @media (max-width: 1024px) {
           .cdi-workspace {
@@ -1680,46 +1548,47 @@ export default function CrystalDiskElysiumEdition() {
           }
         }
 
-        /* Левая витрина персонажа (прозрачная, чтобы портрет на холсте был виден целиком) */
+        /* Левая портретная витрина с чистым блоком монолога без скроллбаров */
         .left-portrait-zone {
           display: flex;
           flex-direction: column;
           justify-content: flex-end;
           min-height: 755px;
-          border-right: 1px solid rgba(226, 212, 190, 0.18);
+          border-right: 1px solid rgba(216, 185, 138, 0.2);
           position: relative;
+          cursor: pointer;
         }
         .dialogue-dossier-overlay {
-          background: linear-gradient(0deg, rgba(8, 5, 15, 0.96) 0%, rgba(11, 8, 20, 0.86) 78%, transparent 100%);
-          padding: 26px 16px 14px 16px;
+          background: linear-gradient(0deg, rgba(8, 10, 9, 0.96) 0%, rgba(12, 16, 14, 0.88) 82%, transparent 100%);
+          padding: 28px 18px 16px 18px;
           display: flex;
           flex-direction: column;
-          gap: 9px;
+          gap: 10px;
+          cursor: default;
         }
 
-        /* Правая полупрозрачная область данных (как в Kurei Kei Edition, сквозь неё виден фон холста) */
+        /* Правая полупрозрачная область данных */
         .right-telemetry-zone {
-          background: rgba(12, 9, 22, 0.56);
-          backdrop-filter: blur(8px);
+          background: rgba(11, 15, 14, 0.62);
+          backdrop-filter: blur(9px);
           padding: 10px 18px 16px 18px;
           display: flex;
           flex-direction: column;
           gap: 10px;
         }
 
-        /* Вкладки дисков в стиле CrystalDiskInfo (строгие прямоугольные плашки) */
         .cdi-disk-selector {
           display: flex;
           flex-wrap: wrap;
           gap: 6px;
-          border-bottom: 1px solid rgba(226, 212, 190, 0.2);
+          border-bottom: 1px solid rgba(216, 185, 138, 0.22);
           padding-bottom: 8px;
         }
         .disk-rect-tab {
-          min-width: 118px;
+          min-width: 122px;
           padding: 5px 12px;
-          background: rgba(18, 14, 30, 0.72);
-          border: 1px solid rgba(226, 212, 190, 0.24);
+          background: rgba(16, 22, 20, 0.78);
+          border: 1px solid rgba(216, 185, 138, 0.26);
           color: #d8cfc2;
           cursor: pointer;
           text-align: left;
@@ -1729,27 +1598,26 @@ export default function CrystalDiskElysiumEdition() {
           transition: all 0.14s;
         }
         .disk-rect-tab:hover {
-          background: rgba(34, 24, 52, 0.85);
-          border-color: rgba(226, 212, 190, 0.5);
+          background: rgba(28, 38, 35, 0.88);
+          border-color: rgba(244, 185, 66, 0.55);
         }
         .disk-rect-tab.active {
-          background: linear-gradient(180deg, rgba(45, 24, 66, 0.9), rgba(20, 14, 36, 0.92));
-          border: 1px solid #ffb703;
-          box-shadow: inset 0 2px 0 #ff0a6c;
+          background: linear-gradient(180deg, rgba(53, 82, 68, 0.88), rgba(18, 26, 23, 0.94));
+          border: 1px solid #f4b942;
+          box-shadow: inset 0 2px 0 #d89228;
           color: #fff;
         }
         .disk-letter-big {
           font-size: 18px;
           font-weight: 700;
-          color: #ffb703;
+          color: #f4b942;
           line-height: 1;
         }
 
-        /* Заголовок модели диска */
         .model-header-strip {
           text-align: center;
           padding: 4px 8px 6px 8px;
-          border-bottom: 1px solid rgba(226, 212, 190, 0.18);
+          border-bottom: 1px solid rgba(216, 185, 138, 0.2);
         }
         .model-name-serif {
           margin: 0;
@@ -1761,7 +1629,6 @@ export default function CrystalDiskElysiumEdition() {
           text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
         }
 
-        /* Двухколоночный паспорт диска + центральная эмблема Белой проверки 2d6 */
         .passport-columns {
           display: grid;
           grid-template-columns: 1fr 94px 1fr;
@@ -1778,7 +1645,7 @@ export default function CrystalDiskElysiumEdition() {
         }
         .spec-line {
           display: grid;
-          grid-template-columns: 132px 1fr;
+          grid-template-columns: 135px 1fr;
           align-items: center;
           gap: 8px;
         }
@@ -1794,8 +1661,8 @@ export default function CrystalDiskElysiumEdition() {
           padding: 0 9px;
           display: flex;
           align-items: center;
-          background: rgba(9, 7, 16, 0.66);
-          border: 1px solid rgba(226, 212, 190, 0.25);
+          background: rgba(8, 11, 10, 0.72);
+          border: 1px solid rgba(216, 185, 138, 0.26);
           box-shadow: inset 0 1px 3px rgba(0,0,0,0.75);
           color: #f8f5f0;
           font-size: 12px;
@@ -1805,14 +1672,13 @@ export default function CrystalDiskElysiumEdition() {
           text-overflow: ellipsis;
         }
 
-        /* Центральная эмблема Белой проверки 2d6 (вместо дешёвого эмодзи) */
         .white-check-emblem {
           width: 88px;
           height: 132px;
           margin: 0 auto;
-          background: linear-gradient(180deg, rgba(28, 16, 42, 0.88), rgba(14, 9, 24, 0.94));
+          background: linear-gradient(180deg, rgba(34, 48, 38, 0.88), rgba(14, 19, 16, 0.95));
           border: 1.5px solid #d4a359;
-          box-shadow: inset 0 0 12px rgba(255, 183, 3, 0.2), 0 4px 14px rgba(0,0,0,0.75);
+          box-shadow: inset 0 0 12px rgba(244, 185, 66, 0.18), 0 4px 14px rgba(0,0,0,0.75);
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -1824,11 +1690,10 @@ export default function CrystalDiskElysiumEdition() {
         }
         .white-check-emblem:hover {
           border-color: #fff;
-          background: linear-gradient(180deg, rgba(255, 10, 108, 0.32), rgba(255, 72, 0, 0.28));
+          background: linear-gradient(180deg, rgba(216, 146, 40, 0.35), rgba(53, 120, 115, 0.32));
           transform: translateY(-1px);
         }
 
-        /* Строгие прямоугольные индикаторы ТЕХСОСТОЯНИЕ и ТЕМПЕРАТУРА (с фаской, без круглых таблеток) */
         .status-plates-row {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -1840,7 +1705,7 @@ export default function CrystalDiskElysiumEdition() {
         }
         .status-plate-wrap {
           display: grid;
-          grid-template-columns: 132px 1fr;
+          grid-template-columns: 135px 1fr;
           align-items: center;
           gap: 8px;
         }
@@ -1858,23 +1723,22 @@ export default function CrystalDiskElysiumEdition() {
           text-shadow: 0 1px 3px rgba(0,0,0,0.9);
         }
         .plate-good {
-          background: linear-gradient(180deg, rgba(16, 138, 158, 0.88) 0%, rgba(11, 82, 107, 0.94) 100%);
-          border-color: #56cfe1;
+          background: linear-gradient(180deg, rgba(42, 118, 110, 0.9) 0%, rgba(22, 68, 64, 0.96) 100%);
+          border-color: #5cb5ad;
         }
         .plate-caution {
-          background: linear-gradient(180deg, rgba(217, 119, 6, 0.9) 0%, rgba(146, 64, 14, 0.95) 100%);
-          border-color: #ffb703;
+          background: linear-gradient(180deg, rgba(216, 130, 38, 0.92) 0%, rgba(142, 72, 16, 0.96) 100%);
+          border-color: #f4b942;
         }
         .plate-bad {
-          background: linear-gradient(180deg, rgba(209, 27, 70, 0.92) 0%, rgba(115, 11, 38, 0.96) 100%);
-          border-color: #ff4d6d;
+          background: linear-gradient(180deg, rgba(185, 28, 28, 0.92) 0%, rgba(105, 14, 14, 0.96) 100%);
+          border-color: #f87171;
         }
 
-        /* Полупрозрачная таблица S.M.A.R.T. */
         .smart-grid-container {
           flex: 1;
-          background: rgba(9, 7, 16, 0.68);
-          border: 1px solid rgba(226, 212, 190, 0.25);
+          background: rgba(8, 11, 10, 0.72);
+          border: 1px solid rgba(216, 185, 138, 0.26);
           display: flex;
           flex-direction: column;
           overflow: hidden;
@@ -1885,17 +1749,17 @@ export default function CrystalDiskElysiumEdition() {
           font-size: 12px;
         }
         .smart-grid-table th {
-          background: rgba(24, 18, 38, 0.88);
+          background: rgba(18, 25, 23, 0.92);
           color: #d8cfc2;
           font-weight: 600;
           padding: 6px 10px;
           text-align: left;
-          border-bottom: 1px solid rgba(226, 212, 190, 0.25);
+          border-bottom: 1px solid rgba(216, 185, 138, 0.25);
           white-space: nowrap;
         }
         .smart-grid-table td {
           padding: 5.5px 10px;
-          border-bottom: 1px solid rgba(226, 212, 190, 0.08);
+          border-bottom: 1px solid rgba(216, 185, 138, 0.08);
           color: #f3eee6;
         }
         .smart-grid-table tr {
@@ -1903,12 +1767,12 @@ export default function CrystalDiskElysiumEdition() {
           transition: background 0.1s;
         }
         .smart-grid-table tr:hover td {
-          background: rgba(255, 10, 108, 0.16);
+          background: rgba(216, 146, 40, 0.16);
         }
         .smart-grid-table tr.active-row td {
-          background: linear-gradient(90deg, rgba(255, 10, 108, 0.32), rgba(86, 207, 225, 0.18));
-          border-top: 1px solid rgba(255, 183, 3, 0.65);
-          border-bottom: 1px solid rgba(255, 183, 3, 0.65);
+          background: linear-gradient(90deg, rgba(216, 146, 40, 0.32), rgba(53, 120, 115, 0.22));
+          border-top: 1px solid rgba(244, 185, 66, 0.65);
+          border-bottom: 1px solid rgba(244, 185, 66, 0.65);
         }
         .diamond-led {
           width: 9px;
@@ -1917,16 +1781,16 @@ export default function CrystalDiskElysiumEdition() {
           transform: rotate(45deg);
         }
         .led-good {
-          background: #56cfe1;
-          box-shadow: 0 0 6px #56cfe1;
+          background: #5cb5ad;
+          box-shadow: 0 0 6px #5cb5ad;
         }
         .led-caution {
-          background: #ffb703;
-          box-shadow: 0 0 6px #ffb703;
+          background: #f4b942;
+          box-shadow: 0 0 6px #f4b942;
         }
         .led-bad {
-          background: #ff2a85;
-          box-shadow: 0 0 8px #ff2a85;
+          background: #ef4444;
+          box-shadow: 0 0 8px #ef4444;
         }
       `,
         }}
@@ -1946,12 +1810,12 @@ export default function CrystalDiskElysiumEdition() {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(18, 9, 36, 0.85)",
+            background: "rgba(14, 20, 18, 0.88)",
             zIndex: 99,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            border: "2px dashed #ffb703",
+            border: "2px dashed #f4b942",
           }}
         >
           <div className="font-serif-disco" style={{ fontSize: "28px", color: "#fff" }}>
@@ -1962,9 +1826,9 @@ export default function CrystalDiskElysiumEdition() {
 
       {/* НАТИВНОЕ ОКНО CRYSTALDISKINFO // DISCO ELYSIUM EDITION */}
       <div className="cdi-native-frame">
-        {/* ПОЛНОЭКРАННЫЙ ХУДОЖЕСТВЕННЫЙ ХОЛСТ НА ВСЁ ОКНО */}
+        {/* ПОЛНОЭКРАННЫЙ ЖИВОПИСНЫЙ ХОЛСТ МАСЛОМ */}
         <div className="masterpiece-bg-layer">
-          <FullWindowMasterpieceCanvas
+          <PainterlyMasterpieceCanvas
             themeId={visualTheme}
             customUrl={activeCustomUrl}
             health={effectiveHealth}
@@ -1980,7 +1844,7 @@ export default function CrystalDiskElysiumEdition() {
               style={{
                 width: "8px",
                 height: "8px",
-                background: "#ffb703",
+                background: "#f4b942",
                 transform: "rotate(45deg)",
                 display: "inline-block",
               }}
@@ -1996,7 +1860,7 @@ export default function CrystalDiskElysiumEdition() {
           </div>
         </div>
 
-        {/* 2. КЛАССИЧЕСКАЯ СТРОКА МЕНЮ (БЕЗ ЭМОДЗИ И ПЕРЕНОСОВ СТРОК) */}
+        {/* 2. СТРОКА МЕНЮ И ПЕРЕКЛЮЧАТЕЛЬ КАРТИН */}
         <nav className="native-menubar">
           <div className="menu-items-left">
             <button onClick={() => setShowImportModal(true)} className="classic-menu-item">
@@ -2030,23 +1894,29 @@ export default function CrystalDiskElysiumEdition() {
 
           <div className="scene-switcher-bar">
             <button
+              onClick={() => setVisualTheme("the_expression")}
+              className={`scene-tab-btn ${visualTheme === "the_expression" ? "active" : ""}`}
+            >
+              I. Ухмылка Кусто
+            </button>
+            <button
+              onClick={() => setVisualTheme("dolores_pieta")}
+              className={`scene-tab-btn ${visualTheme === "dolores_pieta" ? "active" : ""}`}
+            >
+              II. Пьета Долорес
+            </button>
+            <button
               onClick={() => setVisualTheme("mind_explosion")}
               className={`scene-tab-btn ${visualTheme === "mind_explosion" ? "active" : ""}`}
             >
-              I. Взрыв Сознания (B&apos; B&apos;&apos;)
-            </button>
-            <button
-              onClick={() => setVisualTheme("church_lasers")}
-              className={`scene-tab-btn ${visualTheme === "church_lasers" ? "active" : ""}`}
-            >
-              II. Церковь и Долорес
+              III. Взрыв (B&apos; B&apos;&apos;)
             </button>
             {customArt1 && (
               <button
                 onClick={() => setVisualTheme("custom_1")}
                 className={`scene-tab-btn ${visualTheme === "custom_1" ? "active" : ""}`}
               >
-                III. Свой Холст #1
+                IV. Свой Холст #1
               </button>
             )}
             {customArt2 && (
@@ -2054,7 +1924,7 @@ export default function CrystalDiskElysiumEdition() {
                 onClick={() => setVisualTheme("custom_2")}
                 className={`scene-tab-btn ${visualTheme === "custom_2" ? "active" : ""}`}
               >
-                IV. Свой Холст #2
+                V. Свой Холст #2
               </button>
             )}
           </div>
@@ -2062,34 +1932,35 @@ export default function CrystalDiskElysiumEdition() {
 
         {/* 3. РАБОЧАЯ ОБЛАСТЬ ОКНА */}
         <div className="cdi-workspace">
-          {/* ЛЕВАЯ ЧАСТЬ: ОТКРЫТОЕ ПОЛОТНО С ПЕРСОНАЖЕМ + ДОСЬЕ ГОЛОСОВ ВНИЗУ */}
-          <aside className="left-portrait-zone" onClick={cycleTheme} title="Нажмите на картину для смены сцены">
+          {/* ЛЕВАЯ ЧАСТЬ: ПОЛОТНО С ПЕРСОНАЖЕМ + БЛОК МОНОЛОГА БЕЗ СКРОЛЛБАРА */}
+          <aside
+            className="left-portrait-zone"
+            onClick={cycleTheme}
+            title="Нажмите на холст для переключения картины"
+          >
             <div className="dialogue-dossier-overlay" onClick={(e) => e.stopPropagation()}>
               <div
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "baseline",
-                  borderBottom: "1px solid rgba(226, 212, 190, 0.25)",
+                  borderBottom: "1px solid rgba(216, 185, 138, 0.28)",
                   paddingBottom: "4px",
                 }}
               >
-                <span className="font-oswald" style={{ fontSize: "11.5px", color: "#ffb703" }}>
+                <span className="font-oswald" style={{ fontSize: "11.5px", color: "#f4b942" }}>
                   Внутренний монолог // Регистр {selectedAttrId}h
                 </span>
-                <span className="font-mono" style={{ fontSize: "11px", color: "#56cfe1" }}>
+                <span className="font-mono" style={{ fontSize: "11px", color: "#5cb5ad" }}>
                   2d6: [{lastDice[0]}][{lastDice[1]}]
                 </span>
               </div>
 
               <div
                 style={{
-                  maxHeight: "205px",
-                  overflowY: "auto",
                   display: "flex",
                   flexDirection: "column",
                   gap: "10px",
-                  paddingRight: "4px",
                 }}
               >
                 {thoughts.map((t) => (
@@ -2138,9 +2009,8 @@ export default function CrystalDiskElysiumEdition() {
             </div>
           </aside>
 
-          {/* ПРАВАЯ ЧАСТЬ: ПОЛУПРОЗРАЧНЫЙ ТЕХНИЧЕСКИЙ СТЕНД CRYSTALDISKINFO */}
+          {/* ПРАВАЯ ЧАСТЬ: ПОЛУПРОЗРАЧНЫЙ СТЕНД CRYSTALDISKINFO (БЕЗ ПОЛЗУНКОВ) */}
           <main className="right-telemetry-zone">
-            {/* Вкладки дисков (как в CrystalDiskInfo) */}
             <div className="cdi-disk-selector">
               {drives.map((drv, idx) => {
                 const ledClass =
@@ -2175,14 +2045,13 @@ export default function CrystalDiskElysiumEdition() {
               })}
             </div>
 
-            {/* Заголовок модели и ёмкости */}
             <div className="model-header-strip">
               <h1 className="model-name-serif">
                 {activeDrive.model} : {activeDrive.capacityGB.toFixed(1)} GB
               </h1>
             </div>
 
-            {/* Двухколоночный паспорт накопителя + кастомная векторная эмблема 2d6 */}
+            {/* Двухколоночный паспорт накопителя (строгие текстовые поля без ползунков) */}
             <div className="passport-columns">
               <div className="spec-stack">
                 <div className="spec-line">
@@ -2217,7 +2086,7 @@ export default function CrystalDiskElysiumEdition() {
                 </div>
               </div>
 
-              {/* Кастомная векторная эмблема Белой проверки 2d6 (без эмодзи) */}
+              {/* Эмблема Белой проверки 2d6 */}
               <button
                 onClick={handleRollDice}
                 className="white-check-emblem"
@@ -2227,10 +2096,9 @@ export default function CrystalDiskElysiumEdition() {
                   <polygon
                     points="30,3 57,30 30,57 3,30"
                     fill="none"
-                    stroke="#ffb703"
+                    stroke="#f4b942"
                     strokeWidth="2"
                   />
-                  {/* Первая кость */}
                   <rect
                     x="13"
                     y="17"
@@ -2243,14 +2111,13 @@ export default function CrystalDiskElysiumEdition() {
                   />
                   <circle cx="18" cy="22" r="1.7" fill="#111" />
                   <circle cx="25" cy="29" r="1.7" fill="#111" />
-                  {/* Вторая кость */}
                   <rect
                     x="29"
                     y="26"
                     width="17"
                     height="17"
                     rx="2"
-                    fill="#ffb703"
+                    fill="#f4b942"
                     stroke="#111"
                     strokeWidth="1.5"
                   />
@@ -2260,11 +2127,16 @@ export default function CrystalDiskElysiumEdition() {
                 </svg>
                 <span
                   className="font-oswald"
-                  style={{ fontSize: "10.5px", color: "#f3eee6", textAlign: "center", lineHeight: 1.2 }}
+                  style={{
+                    fontSize: "10.5px",
+                    color: "#f3eee6",
+                    textAlign: "center",
+                    lineHeight: 1.2,
+                  }}
                 >
                   ПРОВЕРКА 2D6
                   <br />
-                  <span style={{ color: "#ffb703" }}>ДОПРОС ЧИПА</span>
+                  <span style={{ color: "#f4b942" }}>ДОПРОС ЧИПА</span>
                 </span>
               </button>
 
@@ -2298,25 +2170,13 @@ export default function CrystalDiskElysiumEdition() {
                   </div>
                 </div>
                 <div className="spec-line">
-                  <span className="spec-caption">Тепловой сдвиг</span>
-                  <div className="spec-value-plate" style={{ gap: "8px" }}>
-                    <input
-                      type="range"
-                      min={-10}
-                      max={25}
-                      value={tempOffset}
-                      onChange={(e) => setTempOffset(Number(e.target.value))}
-                      style={{ width: "100%", accentColor: "#ffb703", cursor: "pointer" }}
-                    />
-                    <span className="font-mono" style={{ fontSize: "11px", color: "#ffb703" }}>
-                      {tempOffset >= 0 ? `+${tempOffset}°` : `${tempOffset}°`}
-                    </span>
-                  </div>
+                  <span className="spec-caption">Ресурс носителя</span>
+                  <div className="spec-value-plate font-mono">{activeDrive.nandEndurance}</div>
                 </div>
               </div>
             </div>
 
-            {/* Две широкие прямоугольные плашки ТЕХСОСТОЯНИЕ и ТЕМПЕРАТУРА (в пропорциях CrystalDiskInfo) */}
+            {/* Две широкие прямоугольные плашки ТЕХСОСТОЯНИЕ и ТЕМПЕРАТУРА */}
             <div className="status-plates-row">
               <div className="status-plate-wrap">
                 <span className="spec-caption" style={{ fontWeight: 600 }}>
@@ -2360,7 +2220,7 @@ export default function CrystalDiskElysiumEdition() {
               </div>
             </div>
 
-            {/* Полупрозрачная таблица S.M.A.R.T. */}
+            {/* Таблица S.M.A.R.T. */}
             <div className="smart-grid-container">
               <div style={{ overflowX: "auto", flex: 1 }}>
                 <table className="smart-grid-table">
@@ -2392,7 +2252,7 @@ export default function CrystalDiskElysiumEdition() {
                           <td style={{ textAlign: "center" }}>
                             <span className={`diamond-led ${ledClass}`} />
                           </td>
-                          <td className="font-mono" style={{ fontWeight: 700, color: "#56cfe1" }}>
+                          <td className="font-mono" style={{ fontWeight: 700, color: "#5cb5ad" }}>
                             {attr.id}
                           </td>
                           <td>
@@ -2415,9 +2275,9 @@ export default function CrystalDiskElysiumEdition() {
                               fontWeight: 700,
                               color:
                                 attr.status === "BAD"
-                                  ? "#ff4d6d"
+                                  ? "#f87171"
                                   : attr.status === "CAUTION"
-                                  ? "#ffb703"
+                                  ? "#f4b942"
                                   : "#a8f9ff",
                             }}
                           >
@@ -2441,7 +2301,7 @@ export default function CrystalDiskElysiumEdition() {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(6, 4, 12, 0.85)",
+            background: "rgba(6, 8, 7, 0.86)",
             backdropFilter: "blur(8px)",
             zIndex: 80,
             display: "flex",
@@ -2454,7 +2314,7 @@ export default function CrystalDiskElysiumEdition() {
             style={{
               width: "100%",
               maxWidth: "620px",
-              background: "#120d20",
+              background: "#111715",
               border: "1px solid #d4a359",
               padding: "22px",
               boxShadow: "0 20px 60px rgba(0, 0, 0, 0.9)",
@@ -2462,7 +2322,7 @@ export default function CrystalDiskElysiumEdition() {
           >
             <h3
               className="font-serif-disco"
-              style={{ margin: "0 0 8px 0", fontSize: "22px", color: "#ffb703" }}
+              style={{ margin: "0 0 8px 0", fontSize: "22px", color: "#f4b942" }}
             >
               Импорт S.M.A.R.T.-отчёта вашего компьютера
             </h3>
@@ -2479,8 +2339,8 @@ export default function CrystalDiskElysiumEdition() {
               className="font-mono"
               style={{
                 width: "100%",
-                background: "#080610",
-                border: "1px solid rgba(226, 212, 190, 0.3)",
+                background: "#080b0a",
+                border: "1px solid rgba(216, 185, 138, 0.3)",
                 color: "#fff",
                 padding: "10px",
                 fontSize: "12px",
@@ -2494,7 +2354,7 @@ export default function CrystalDiskElysiumEdition() {
               <button
                 onClick={handleImportSubmit}
                 className="classic-menu-item"
-                style={{ border: "1px solid #ffb703", color: "#ffb703" }}
+                style={{ border: "1px solid #f4b942", color: "#f4b942" }}
               >
                 Загрузить телеметрию
               </button>
