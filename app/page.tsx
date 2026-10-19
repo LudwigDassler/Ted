@@ -361,15 +361,11 @@ function FullWindowMasterpieceCanvas({
         ctx.closePath();
         ctx.fill();
 
-        // Острый белый уголок воротника рубашки с розовым рефлексом
-        ctx.fillStyle = "#d896b8";
-        ctx.beginPath();
-        ctx.moveTo(152, 448);
-        ctx.lineTo(142, 522);
-        ctx.lineTo(168, 498);
-        ctx.lambda;
-        ctx.closePath();
-        ctx.fill();
+       ctx.moveTo(152, 448);
+ctx.lineTo(142, 522);
+ctx.lineTo(168, 498);
+ctx.closePath();
+ctx.fill();
 
         // 5.3. Анатомия запрокинутой шеи (грудино-ключично-сосцевидная мышца и гортань)
         const neckShadow = ctx.createLinearGradient(145, 370, 265, 490);
