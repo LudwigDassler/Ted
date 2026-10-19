@@ -3,11 +3,11 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 
 // ============================================================================
-// 1. ТИПЫ ДАННЫХ S.M.A.R.T. И СИСТЕМЫ НАВЫКОВ DISCO ELYSIUM
+// 1. ТИПЫ ДАННЫХ CRYSTALDISKINFO + DISCO ELYSIUM
 // ============================================================================
 
 type HealthState = "GOOD" | "CAUTION" | "BAD";
-type ArtPieceId = "tequila" | "interfacing" | "inland" | "kim";
+type VisualThemeId = "mind_explosion" | "church_lasers" | "custom_1" | "custom_2";
 
 interface SmartAttribute {
   id: string;
@@ -21,7 +21,7 @@ interface SmartAttribute {
   unit?: string;
   voices: {
     skill: string;
-    category: "INT" | "PSY" | "FYS" | "MOT";
+    category: "INT" | "PSY" | "FYS" | "MOT" | "TIE";
     difficulty: string;
     text: string;
   }[];
@@ -41,426 +41,504 @@ interface DriveProfile {
   features: string;
   healthStatus: HealthState;
   healthPercent: number;
-  moralePercent: number;
   temperature: number;
   totalReadsGB: number;
   totalWritesGB: number;
   powerOnCount: number;
   powerOnHours: number;
   rotationRate: string;
-  introQuote: string;
   isRealHardware?: boolean;
   attributes: SmartAttribute[];
 }
 
-interface DialogueEntry {
+interface DialogueMessage {
   id: string;
   skill: string;
-  category: "INT" | "PSY" | "FYS" | "MOT" | "SYS" | "YOU";
+  category: "INT" | "PSY" | "FYS" | "MOT" | "TIE" | "YOU";
   difficulty?: string;
-  checkResult?: "SUCCESS" | "FAILURE" | "INFO";
   text: string;
 }
 
 // ============================================================================
-// 2. ЗВУКОВОЙ СИНТЕЗАТОР WEB AUDIO (ЩЕЛЧКИ HDD, КУБИКИ 2D6 И АККОРДЫ ПРОВЕРОК)
+// 2. АТМОСФЕРНЫЙ ЗВУКОВОЙ СИНТЕЗАТОР (WEB AUDIO API)
 // ============================================================================
 
-class DiscoAudioEngine {
+class ElysiumSound {
   private ctx: AudioContext | null = null;
   public enabled: boolean = true;
 
   private init() {
     if (typeof window === "undefined") return;
     if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      this.ctx = new AudioCtx();
+      const AC =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      this.ctx = new AC();
     }
-    if (this.ctx.state === "suspended") {
-      this.ctx.resume();
-    }
+    if (this.ctx.state === "suspended") this.ctx.resume();
   }
 
-  /** Короткий механический щелчок позиционирования магнитной головки HDD */
-  playActuatorClick(status: HealthState = "GOOD") {
+  playClick(status: HealthState = "GOOD") {
     if (!this.enabled) return;
     try {
       this.init();
       if (!this.ctx) return;
-      const now = this.ctx.currentTime;
-
+      const t = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
-      osc.type = status === "BAD" ? "sawtooth" : "triangle";
-      osc.frequency.setValueAtTime(status === "BAD" ? 190 : 620, now);
-      osc.frequency.exponentialRampToValueAtTime(55, now + 0.045);
-
-      gain.gain.setValueAtTime(0.14, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
-
+      osc.type = status === "BAD" ? "sawtooth" : "sine";
+      osc.frequency.setValueAtTime(status === "BAD" ? 160 : 540, t);
+      osc.frequency.exponentialRampToValueAtTime(65, t + 0.05);
+      gain.gain.setValueAtTime(0.12, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
       osc.connect(gain);
       gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.05);
+      osc.start(t);
+      osc.stop(t + 0.055);
     } catch {}
   }
 
-  /** Звук переката двух костей и атмосферный аккорд в стиле British Sea Power */
-  playDiceRoll(success: boolean) {
+  playPrismChord(success: boolean) {
     if (!this.enabled) return;
     try {
       this.init();
       if (!this.ctx) return;
-      const now = this.ctx.currentTime;
-
-      // Серия щелчков кубиков о сукно
-      [0, 0.06, 0.13, 0.22].forEach((offset) => {
+      const t = this.ctx.currentTime;
+      const notes = success ? [220, 277.18, 329.63, 440, 554.37] : [110, 116.54, 164.81];
+      notes.forEach((freq, i) => {
         if (!this.ctx) return;
         const osc = this.ctx.createOscillator();
         const g = this.ctx.createGain();
-        osc.type = "square";
-        osc.frequency.setValueAtTime(800 + Math.random() * 500, now + offset);
-        osc.frequency.exponentialRampToValueAtTime(120, now + offset + 0.025);
-        g.gain.setValueAtTime(0.08, now + offset);
-        g.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.025);
+        osc.type = success ? "triangle" : "sawtooth";
+        osc.frequency.setValueAtTime(freq, t + i * 0.04);
+        g.gain.setValueAtTime(0.001, t + i * 0.04);
+        g.gain.linearRampToValueAtTime(success ? 0.055 : 0.04, t + i * 0.04 + 0.08);
+        g.gain.exponentialRampToValueAtTime(0.0005, t + 1.6);
         osc.connect(g);
         g.connect(this.ctx.destination);
-        osc.start(now + offset);
-        osc.stop(now + offset + 0.03);
-      });
-
-      // Финальный аккорд (высокий духовой при успехе, вязкий низкий при провале)
-      const chordFreqs = success ? [261.63, 329.63, 392.0, 523.25] : [110.0, 130.81, 155.56];
-      chordFreqs.forEach((f) => {
-        if (!this.ctx) return;
-        const osc = this.ctx.createOscillator();
-        const g = this.ctx.createGain();
-        osc.type = success ? "sine" : "sawtooth";
-        osc.frequency.setValueAtTime(f, now + 0.28);
-        g.gain.setValueAtTime(0.001, now + 0.28);
-        g.gain.linearRampToValueAtTime(success ? 0.06 : 0.045, now + 0.35);
-        g.gain.exponentialRampToValueAtTime(0.0008, now + 1.4);
-        osc.connect(g);
-        g.connect(this.ctx.destination);
-        osc.start(now + 0.28);
-        osc.stop(now + 1.45);
+        osc.start(t + i * 0.04);
+        osc.stop(t + 1.65);
       });
     } catch {}
   }
 }
 
-const audioEngine = new DiscoAudioEngine();
+const soundFX = new ElysiumSound();
 
 // ============================================================================
-// 3. ПРОЦЕДУРНЫЙ ХУДОЖНИК МАСЛЯНОЙ ЖИВОПИСИ НА HTML5 CANVAS (СТИЛЬ РОСТОВА)
+// 3. ПРОЦЕДУРНЫЙ 60-FPS ХОЛСТ: «ВЗРЫВ СОЗНАНИЯ» (image_542721) И «ЛАЗЕРЫ В ЦЕРКВИ» (image_54817e)
 // ============================================================================
 
-function ImpastoOilPortrait({
-  artId,
+function PsychedelicArtworkCanvas({
+  themeId,
+  customUrl,
   health,
   temp,
 }: {
-  artId: ArtPieceId;
+  themeId: VisualThemeId;
+  customUrl: string | null;
   health: HealthState;
   temp: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
+    if (customUrl) return; // Если пользователь загрузил свой арт, рендерим <img>
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const W = canvas.width;
-    const H = canvas.height;
+    let animId: number;
+    let frame = 0;
 
-    // Детерминированный генератор для стабильных мазков мастихина
-    let seed =
-      (artId === "tequila" ? 101 : artId === "interfacing" ? 202 : artId === "inland" ? 303 : 404) +
-      (health === "GOOD" ? 1 : health === "CAUTION" ? 2 : 3);
-    const rand = () => {
-      seed = (seed * 1664525 + 1013904223) % 4294967296;
-      return seed / 4294967296;
+    // Предварительно генерируем осколки психоделического взрыва из виска
+    const shards = Array.from({ length: 85 }, (_, i) => {
+      // Веер лучей бьёт из точки виска (x=245, y=310) влево-вверх, как на арте @AstriaNabla
+      const baseAngle = -Math.PI * 0.72 + (i / 85) * (Math.PI * 0.62);
+      const length = 110 + ((i * 73) % 340);
+      const spread = 0.025 + ((i * 19) % 10) * 0.008;
+      const palette = [
+        "#ff007f", // Неоновая фуксия
+        "#ff4d00", // Огненно-оранжевый
+        "#ffbe0b", // Кислотно-золотой
+        "#00f5d4", // Электрический циан
+        "#8338ec", // Ультрафиолет
+        "#ff5d8f", // Розовый кадмий
+        "#3a86ff", // Кобальт
+      ];
+      return {
+        angle: baseAngle,
+        length,
+        spread,
+        color: palette[i % palette.length],
+        speed: 0.008 + (i % 7) * 0.003,
+        offset: i * 0.4,
+      };
+    });
+
+    const render = () => {
+      frame += 1;
+      const W = canvas.width;
+      const H = canvas.height;
+      const t = frame * 0.02;
+
+      if (themeId === "mind_explosion") {
+        // ====================================================================
+        // СЦЕНА 1: «ПСИХОДЕЛИЧЕСКИЙ ВЗРЫВ СОЗНАНИЯ (B' B'' B''')»
+        // ====================================================================
+        const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+        bgGrad.addColorStop(0, "#120724");
+        bgGrad.addColorStop(0.5, "#0b0716");
+        bgGrad.addColorStop(1, "#06040a");
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        const originX = 242;
+        const originY = 305;
+
+        // 1. Фоновое зарево взрыва
+        const burstGlow = ctx.createRadialGradient(originX - 60, originY - 90, 10, originX - 60, originY - 90, 320);
+        burstGlow.addColorStop(0, "rgba(255, 190, 11, 0.95)");
+        burstGlow.addColorStop(0.25, "rgba(255, 0, 127, 0.65)");
+        burstGlow.addColorStop(0.6, "rgba(131, 56, 236, 0.28)");
+        burstGlow.addColorStop(1, "transparent");
+        ctx.fillStyle = burstGlow;
+        ctx.fillRect(0, 0, W, H);
+
+        // 2. Острые живописные осколки-мазки, вылетающие из головы Гарри
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+        shards.forEach((sh, idx) => {
+          const pulse = Math.sin(t * 1.5 + sh.offset) * 14;
+          const a = sh.angle + Math.sin(t * 0.7 + idx) * 0.018;
+          const r = sh.length + pulse + (temp > 50 ? 35 : 0);
+
+          const x1 = originX + Math.cos(a) * 12;
+          const y1 = originY + Math.sin(a) * 12;
+          const x2 = originX + Math.cos(a - sh.spread) * r;
+          const y2 = originY + Math.sin(a - sh.spread) * r;
+          const x3 = originX + Math.cos(a + sh.spread) * (r * 0.92);
+          const y3 = originY + Math.sin(a + sh.spread) * (r * 0.92);
+
+          ctx.fillStyle = sh.color;
+          ctx.globalAlpha = 0.78;
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.lineTo(x3, y3);
+          ctx.closePath();
+          ctx.fill();
+        });
+        ctx.restore();
+
+        // 3. Белые меловые дуги и математические символы B', B'', B''' справа вверху
+        ctx.save();
+        ctx.strokeStyle = "rgba(168, 218, 220, 0.42)";
+        ctx.lineWidth = 2;
+        [0, 1, 2].forEach((arcIdx) => {
+          ctx.beginPath();
+          ctx.moveTo(originX, originY - 10);
+          ctx.quadraticCurveTo(
+            originX + 60,
+            150 - arcIdx * 35,
+            W - 25,
+            40 + arcIdx * 55
+          );
+          ctx.stroke();
+        });
+        ctx.font = "italic bold 26px Georgia, serif";
+        ctx.fillStyle = "rgba(216, 243, 220, 0.78)";
+        ctx.fillText("B'", 295, 130 + Math.sin(t) * 4);
+        ctx.font = "italic bold 22px Georgia, serif";
+        ctx.fillText("B''", 355, 82 + Math.cos(t) * 4);
+        ctx.font = "italic bold 19px Georgia, serif";
+        ctx.fillText("B'''", 338, 185 + Math.sin(t * 1.2) * 3);
+        ctx.restore();
+
+        // 4. Детальный экспрессионистский силуэт Гарри с запрокинутой головой и пальцами у виска
+        ctx.save();
+        // Плечи и пиджак в фиолетово-пурпурном контровом свете
+        ctx.fillStyle = "#190e26";
+        ctx.beginPath();
+        ctx.moveTo(25, H);
+        ctx.lineTo(68, 515);
+        ctx.lineTo(155, 445);
+        ctx.lineTo(295, 455);
+        ctx.lineTo(395, H);
+        ctx.closePath();
+        ctx.fill();
+
+        // Лацканы пиджака с розово-лиловым рефлексом от взрыва
+        ctx.fillStyle = "#4a1c5c";
+        ctx.beginPath();
+        ctx.moveTo(95, 510);
+        ctx.lineTo(165, 438);
+        ctx.lineTo(195, 560);
+        ctx.lineTo(118, 580);
+        ctx.closePath();
+        ctx.fill();
+
+        // Запрокинутая шея с резкой светотенью
+        ctx.fillStyle = "#5e2563";
+        ctx.beginPath();
+        ctx.moveTo(162, 375);
+        ctx.lineTo(255, 390);
+        ctx.lineTo(245, 495);
+        ctx.lineTo(155, 465);
+        ctx.closePath();
+        ctx.fill();
+
+        // Яркий розовый блик на гортани и скуле от вспышки мозга
+        ctx.fillStyle = "#f77f8b";
+        ctx.beginPath();
+        ctx.moveTo(164, 382);
+        ctx.lineTo(198, 405);
+        ctx.lineTo(185, 472);
+        ctx.lineTo(158, 450);
+        ctx.closePath();
+        ctx.fill();
+
+        // Голова, запрокинутая назад (скулы, нос, надбровные дуги)
+        ctx.fillStyle = "#8a387c";
+        ctx.beginPath();
+        ctx.moveTo(152, 338);
+        ctx.lineTo(195, 272);
+        ctx.lineTo(268, 268);
+        ctx.lineTo(302, 335);
+        ctx.lineTo(275, 412);
+        ctx.lineTo(165, 392);
+        ctx.closePath();
+        ctx.fill();
+
+        // Ослепительно-розовый и золотой свет на лбу, щеке и переносице
+        ctx.fillStyle = "#ffb3ab";
+        ctx.beginPath();
+        ctx.moveTo(185, 278);
+        ctx.lineTo(246, 275);
+        ctx.lineTo(258, 345);
+        ctx.lineTo(212, 365);
+        ctx.lineTo(175, 325);
+        ctx.closePath();
+        ctx.fill();
+
+        // Закатившиеся белки глаз, полные неонового света
+        ctx.fillStyle = "#ffe5ec";
+        ctx.beginPath();
+        ctx.ellipse(202, 308, 12, 6, -0.25, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(252, 316, 13, 6, 0.15, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Густые усы и бакенбарды в драматическом фиолетовом полумраке
+        ctx.fillStyle = "#2d1238";
+        ctx.beginPath();
+        ctx.moveTo(154, 348);
+        ctx.quadraticCurveTo(198, 325, 248, 355);
+        ctx.quadraticCurveTo(278, 378, 265, 412);
+        ctx.lineTo(228, 395);
+        ctx.quadraticCurveTo(195, 362, 158, 385);
+        ctx.closePath();
+        ctx.fill();
+
+        // Развевающиеся тёмные волосы справа
+        ctx.fillStyle = "#160a21";
+        ctx.beginPath();
+        ctx.moveTo(245, 265);
+        ctx.quadraticCurveTo(315, 265, 345, 345);
+        ctx.lineTo(315, 425);
+        ctx.lineTo(275, 395);
+        ctx.closePath();
+        ctx.fill();
+
+        // Рука с двумя пальцами, приставленными к виску ("пистолет у головы")
+        ctx.fillStyle = "#6b286b";
+        ctx.beginPath();
+        ctx.moveTo(295, 338); // Кончики пальцев у виска
+        ctx.lineTo(348, 355);
+        ctx.lineTo(372, 435);
+        ctx.lineTo(318, 445);
+        ctx.lineTo(288, 365);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      } else {
+        // ====================================================================
+        // СЦЕНА 2: «ХАРДКОР В ЦЕРКВИ // ДОЛОРЕС ДЕЙ И ЛАЗЕРЫ» (image_54817e)
+        // ====================================================================
+        const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+        bgGrad.addColorStop(0, "#1d2d3a");
+        bgGrad.addColorStop(0.5, "#2b2118");
+        bgGrad.addColorStop(1, "#0f1419");
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // 1. Золотое витражное окно Долорес Дей в центре
+        ctx.save();
+        ctx.fillStyle = "#d4a359";
+        ctx.beginPath();
+        ctx.moveTo(120, 0);
+        ctx.lineTo(360, 0);
+        ctx.lineTo(310, 420);
+        ctx.lineTo(80, 420);
+        ctx.closePath();
+        ctx.fill();
+
+        // Светящиеся лёгкие Долорес Дей (золотисто-жёлтое сердце витража)
+        const lungsGlow = ctx.createRadialGradient(235, 145, 5, 235, 145, 95);
+        lungsGlow.addColorStop(0, "#fff3b0");
+        lungsGlow.addColorStop(0.5, "#f2b441");
+        lungsGlow.addColorStop(1, "rgba(180, 115, 40, 0)");
+        ctx.fillStyle = lungsGlow;
+        ctx.fillRect(80, 20, 280, 320);
+
+        // Силуэт Долорес Дей в витраже
+        ctx.fillStyle = "#5c4728";
+        ctx.beginPath();
+        ctx.arc(235, 65, 22, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(185, 115);
+        ctx.lineTo(285, 115);
+        ctx.lineTo(305, 310);
+        ctx.lineTo(165, 310);
+        ctx.closePath();
+        ctx.fill();
+
+        // Два золотых светящихся лёгких внутри груди Долорес
+        ctx.fillStyle = "#ffe66d";
+        ctx.beginPath();
+        ctx.ellipse(220, 148, 14, 22, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(250, 148, 14, 22, -0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // 2. Силуэт Кима Кицураги на переднем плане в ярко-оранжевом бомбере
+        ctx.save();
+        // Тёмные брюки
+        ctx.fillStyle = "#14181d";
+        ctx.beginPath();
+        ctx.moveTo(55, 390);
+        ctx.lineTo(195, 390);
+        ctx.lineTo(225, H);
+        ctx.lineTo(75, H);
+        ctx.closePath();
+        ctx.fill();
+
+        // Знаменитая ярко-оранжевая куртка-бомбер Кима
+        ctx.fillStyle = "#e85d1a";
+        ctx.beginPath();
+        ctx.moveTo(45, 235);
+        ctx.lineTo(175, 205);
+        ctx.lineTo(215, 315);
+        ctx.lineTo(165, 395);
+        ctx.lineTo(52, 375);
+        ctx.closePath();
+        ctx.fill();
+
+        // Складки и тени на рукаве бомбера + белая эмблема РГМ
+        ctx.fillStyle = "#9e360c";
+        ctx.beginPath();
+        ctx.moveTo(115, 235);
+        ctx.lineTo(195, 295);
+        ctx.lineTo(165, 385);
+        ctx.lineTo(95, 345);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = "#e0f2fe";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(145, 265, 11, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Голова Кима и ярко светящиеся круглые очки
+        ctx.fillStyle = "#c98a63";
+        ctx.beginPath();
+        ctx.arc(98, 185, 28, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#e0f7ff";
+        ctx.beginPath();
+        ctx.arc(88, 188, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(110, 184, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // 3. ПРОНЗИТЕЛЬНЫЕ ЭЛЕКТРИЧЕСКИЕ ГОЛУБЫЕ ЛАЗЕРНЫЕ ЛУЧИ В ЦЕРКВИ
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+        const laserBeams = [
+          { x1: 0, y1: 85, x2: W, y2: 360, w: 18 },
+          { x1: 95, y1: 0, x2: W, y2: 520, w: 10 },
+          { x1: 240, y1: 0, x2: 0, y2: 390, w: 8 },
+          { x1: 0, y1: 540, x2: W, y2: 310, w: 14 },
+          { x1: 0, y1: 480, x2: W, y2: 245, w: 6 },
+        ];
+        laserBeams.forEach((b, i) => {
+          const shift = Math.sin(t * 1.4 + i) * 6;
+          ctx.strokeStyle = "rgba(0, 229, 255, 0.35)";
+          ctx.lineWidth = b.w * 2.2;
+          ctx.beginPath();
+          ctx.moveTo(b.x1, b.y1 + shift);
+          ctx.lineTo(b.x2, b.y2 - shift);
+          ctx.stroke();
+
+          ctx.strokeStyle = "#80f5ff";
+          ctx.lineWidth = b.w * 0.65;
+          ctx.beginPath();
+          ctx.moveTo(b.x1, b.y1 + shift);
+          ctx.lineTo(b.x2, b.y2 - shift);
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+
+      animId = requestAnimationFrame(render);
     };
 
-    // Вспомогательная функция: густой текстурный мазок кисти / мастихина
-    const paintStroke = (
-      x1: number,
-      y1: number,
-      x2: number,
-      y2: number,
-      width: number,
-      color: string,
-      alpha = 0.85
-    ) => {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
-      ctx.lineCap = "butt";
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.quadraticCurveTo(
-        (x1 + x2) / 2 + (rand() - 0.5) * 14,
-        (y1 + y2) / 2 + (rand() - 0.5) * 14,
-        x2,
-        y2
-      );
-      ctx.stroke();
+    render();
+    return () => cancelAnimationFrame(animId);
+  }, [themeId, customUrl, health, temp]);
 
-      // Светлый гребень масляной краски по краю мазка (импасто)
-      ctx.globalAlpha = alpha * 0.35;
-      ctx.lineWidth = Math.max(1, width * 0.22);
-      ctx.strokeStyle = "#fff5e4";
-      ctx.stroke();
-      ctx.restore();
-    };
-
-    // 1. Грунтовка холста (глубокий умбристый подмалёвок)
-    ctx.fillStyle = "#0e0c0a";
-    ctx.fillRect(0, 0, W, H);
-
-    // Палитра фона в зависимости от состояния диска и температуры
-    const bgPalette =
-      health === "GOOD"
-        ? ["#132a28", "#1f4e48", "#2d6e66", "#c47d2b", "#241c18"]
-        : health === "CAUTION"
-        ? ["#2b1911", "#613214", "#b85d19", "#d99326", "#1c1613"]
-        : ["#260b0e", "#591119", "#9e1f28", "#e03c31", "#140b0d"];
-
-    // 2. Экспрессионистские фоновые плоскости мастихином
-    for (let i = 0; i < 65; i++) {
-      const x = rand() * W;
-      const y = rand() * H;
-      const angle = -0.65 + (rand() - 0.5) * 0.8;
-      const len = 45 + rand() * 90;
-      const col = bgPalette[Math.floor(rand() * bgPalette.length)];
-      paintStroke(
-        x,
-        y,
-        x + Math.cos(angle) * len,
-        y + Math.sin(angle) * len,
-        14 + rand() * 24,
-        col,
-        0.65
-      );
-    }
-
-    // 3. Светящийся нимб (Корона мыслей Disco Elysium позади головы)
-    const haloColor =
-      temp >= 55 || health === "BAD"
-        ? "#ff3b28"
-        : health === "CAUTION"
-        ? "#f2a93b"
-        : "#68c7b7";
-
-    ctx.save();
-    const grad = ctx.createRadialGradient(W * 0.5, H * 0.42, 12, W * 0.5, H * 0.42, 118);
-    grad.addColorStop(0, haloColor + "66");
-    grad.addColorStop(0.6, haloColor + "22");
-    grad.addColorStop(1, "transparent");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-
-    // Рваная золотая дуга нимба
-    ctx.strokeStyle = haloColor;
-    ctx.lineWidth = 3.5;
-    ctx.globalAlpha = 0.85;
-    for (let a = 0; a < Math.PI * 2; a += 0.32) {
-      if (rand() > 0.2) {
-        ctx.beginPath();
-        ctx.arc(W * 0.5, H * 0.42, 78 + (rand() - 0.5) * 5, a, a + 0.22);
-        ctx.stroke();
-      }
-    }
-    ctx.restore();
-
-    // ========================================================================
-    // СЮЖЕТ 1: «ТЕКИЛА САНСЕТ» (Экспрессионистский портрет Гарри Дюбуа)
-    // ========================================================================
-    if (artId === "tequila") {
-      // Мазки пиджака и поднятого воротника
-      paintStroke(35, 290, 82, 185, 44, "#1b2824", 0.95);
-      paintStroke(205, 290, 158, 185, 44, "#141f1c", 0.95);
-      paintStroke(65, 290, 175, 290, 55, "#23332e", 0.95);
-
-      // Белая рубашка ипылающий Ужасающий Галстук
-      paintStroke(120, 182, 120, 265, 26, "#d8cbb8", 0.9);
-      paintStroke(118, 192, 124, 285, 16, "#e04825", 0.95);
-      paintStroke(122, 205, 114, 260, 9, "#f5b82e", 0.9);
-      paintStroke(114, 225, 128, 245, 6, "#38bdf8", 0.85);
-
-      // Шея в глубокой тени
-      paintStroke(105, 148, 118, 192, 34, "#6e3b2c", 0.92);
-      paintStroke(132, 148, 124, 192, 28, "#47231b", 0.92);
-
-      // Лепка лица грубыми цветными плоскостями (охра, кадмий красный, синеватые тени)
-      paintStroke(88, 72, 92, 152, 38, "#c98a63", 0.95);
-      paintStroke(148, 72, 144, 152, 38, "#9c5c42", 0.95);
-      paintStroke(118, 65, 118, 158, 42, "#d99f76", 0.95);
-
-      // Алкогольный румянец и прожилки на скулах и переносице (фирменный красный мазок Ростова)
-      paintStroke(78, 114, 112, 122, 22, "#c84638", 0.82);
-      paintStroke(162, 114, 128, 122, 22, "#a33227", 0.82);
-      paintStroke(118, 88, 121, 128, 15, "#d1493b", 0.9);
-      paintStroke(108, 72, 134, 76, 16, "#e8b88a", 0.85); // Блик на лбу
-
-      // Бакенбарды и густые усы «Выражения»
-      paintStroke(72, 102, 78, 162, 24, "#2e1d14", 0.95);
-      paintStroke(168, 102, 160, 162, 24, "#24160e", 0.95);
-      paintStroke(82, 138, 120, 132, 18, "#382318", 0.96);
-      paintStroke(158, 138, 120, 132, 18, "#291911", 0.96);
-
-      // Безумная ухмылка «Выражения»
-      paintStroke(98, 149, 142, 147, 8, "#170f0b", 0.95);
-      paintStroke(104, 148, 134, 147, 4, "#e8dec8", 0.88);
-
-      // Глубокие глазницы и лихорадочный взгляд
-      paintStroke(84, 96, 108, 98, 12, "#1c1311", 0.95);
-      paintStroke(132, 98, 156, 96, 12, "#1c1311", 0.95);
-      paintStroke(92, 97, 99, 97, 5, health === "BAD" ? "#ff3b28" : "#7dd3fc", 0.98);
-      paintStroke(140, 97, 147, 97, 5, health === "BAD" ? "#ff3b28" : "#7dd3fc", 0.98);
-
-      // Растрёпанные вихри волос
-      paintStroke(68, 82, 95, 42, 24, "#2b1c13", 0.94);
-      paintStroke(95, 44, 148, 42, 26, "#3b271b", 0.94);
-      paintStroke(145, 44, 174, 86, 22, "#1f140d", 0.94);
-    }
-
-    // ========================================================================
-    // СЮЖЕТ 2: НАВЫК «ИНТЕРФЕЙС» (Сюрреалистичный многорукий бог машин)
-    // ========================================================================
-    if (artId === "interfacing") {
-      // Золотые магнитные диски и концентрические дорожки
-      ctx.save();
-      ctx.strokeStyle = "#f2b441";
-      ctx.lineWidth = 4;
-      for (let r = 24; r <= 88; r += 16) {
-        ctx.beginPath();
-        ctx.arc(120, 112, r, 0.2, Math.PI * 1.75);
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      // Абстрактная золотая голова-призма
-      paintStroke(120, 48, 92, 125, 26, "#d99326", 0.92);
-      paintStroke(120, 48, 148, 125, 26, "#9c6214", 0.92);
-      paintStroke(96, 125, 144, 125, 28, "#f5c76b", 0.92);
-      paintStroke(120, 75, 120, 155, 14, "#14100c", 0.95);
-
-      // Веер механических пальцев/рук, считывающих дорожки диска
-      const handAngles = [-0.9, -0.5, -0.15, 0.2, 0.55, 0.95];
-      handAngles.forEach((ang, idx) => {
-        const xStart = 120 + Math.sin(ang) * 25;
-        const yStart = 240;
-        const xMid = 120 + Math.sin(ang) * 75;
-        const yMid = 165 - Math.cos(ang) * 25;
-        const xTip = 120 + Math.sin(ang) * 95;
-        const yTip = 115 - Math.cos(ang) * 55;
-        paintStroke(
-          xStart,
-          yStart,
-          xMid,
-          yMid,
-          12,
-          idx % 2 === 0 ? "#e09f3e" : "#b87324",
-          0.92
-        );
-        paintStroke(xMid, yMid, xTip, yTip, 6, "#fff0c2", 0.95);
-      });
-    }
-
-    // ========================================================================
-    // СЮЖЕТ 3: «ВНУТРЕННЯЯ ИМПЕРИЯ» (Сюрреалистическая туманность Сероты вместо головы)
-    // ========================================================================
-    if (artId === "inland") {
-      // Строгий тёмный пиджак без головы
-      paintStroke(38, 290, 82, 182, 46, "#1a1423", 0.96);
-      paintStroke(202, 290, 158, 182, 46, "#120d18", 0.96);
-      paintStroke(85, 185, 155, 185, 32, "#2a1e38", 0.95);
-
-      // Взрыв фиолетово-бирюзовой Сероты и осколков памяти вместо лица
-      const nebulaColors = ["#7b52ab", "#a67ce0", "#e0533c", "#48bfe3", "#f7d08a"];
-      for (let i = 0; i < 38; i++) {
-        const ang = (i / 38) * Math.PI * 2;
-        const r1 = 8 + rand() * 25;
-        const r2 = 45 + rand() * 58;
-        paintStroke(
-          120 + Math.cos(ang) * r1,
-          108 + Math.sin(ang) * r1,
-          120 + Math.cos(ang + 0.25) * r2,
-          108 + Math.sin(ang + 0.25) * r2,
-          8 + rand() * 14,
-          nebulaColors[i % nebulaColors.length],
-          0.85
-        );
-      }
-      // Тёмное ядро пустоты в центре
-      paintStroke(105, 95, 135, 118, 28, "#0d0912", 0.95);
-      paintStroke(112, 104, 128, 104, 6, "#fff5e4", 0.98);
-    }
-
-    // ========================================================================
-    // СЮЖЕТ 4: «КИМ КИЦУРАГИ» (Оранжевый бомбер и белые блики очков)
-    // ========================================================================
-    if (artId === "kim") {
-      // Ярко-оранжевая куртка-бомбер мазками кадмия
-      paintStroke(32, 290, 78, 178, 48, "#d95326", 0.96);
-      paintStroke(208, 290, 162, 178, 48, "#9e3614", 0.96);
-      paintStroke(65, 240, 175, 255, 42, "#e86838", 0.92);
-      paintStroke(92, 172, 148, 172, 26, "#1f1d1b", 0.96); // Тёмный воротник
-
-      // Скулы и лицо в полутени
-      paintStroke(90, 72, 96, 154, 34, "#cfa07e", 0.95);
-      paintStroke(150, 72, 144, 154, 34, "#8f6247", 0.95);
-      paintStroke(120, 68, 120, 158, 36, "#deb392", 0.95);
-
-      // Чёрные волосы и чёткий силуэт
-      paintStroke(82, 66, 158, 64, 26, "#141312", 0.98);
-
-      // Культовые очки Кима — два резких белых мазка мастихином
-      paintStroke(82, 98, 114, 100, 16, "#f0f9ff", 0.98);
-      paintStroke(126, 100, 158, 98, 16, "#bae6fd", 0.98);
-      paintStroke(78, 98, 162, 98, 3, "#111111", 0.95);
-
-      // Спокойная линия рта и поднятая бровь
-      paintStroke(104, 142, 136, 141, 5, "#2b1b14", 0.95);
-    }
-
-    // 4. Финальные экспрессионистские брызги и царапины холста поверх портрета
-    for (let s = 0; s < 18; s++) {
-      const sx = rand() * W;
-      const sy = rand() * H;
-      paintStroke(
-        sx,
-        sy,
-        sx + (rand() - 0.5) * 35,
-        sy + (rand() - 0.5) * 35,
-        2 + rand() * 3,
-        s % 3 === 0 ? "#f4d35e" : s % 3 === 1 ? "#e0533c" : "#48bfe3",
-        0.55
-      );
-    }
-  }, [artId, health, temp]);
+  if (customUrl) {
+    return (
+      <img
+        src={customUrl}
+        alt="Disco Elysium Custom Artwork"
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          objectPosition: "center top",
+          display: "block",
+        }}
+      />
+    );
+  }
 
   return (
     <canvas
       ref={canvasRef}
-      width={240}
-      height={290}
+      width={420}
+      height={640}
       style={{
         width: "100%",
         height: "100%",
+        objectFit: "cover",
         display: "block",
-        filter: "contrast(1.15) saturate(1.18)",
       }}
     />
   );
 }
 
 // ============================================================================
-// 4. БАЗА ДАННЫХ ДИСКОВ (ДЕМО-ПРОФИЛИ + ПАРСЕР РЕАЛЬНОГО ЖЕЛЕЗА)
+// 4. ПРОФИЛИ НАКОПИТЕЛЕЙ И РЕАЛЬНЫЕ DIALOGUE-РЕПЛИКИ В ДУХЕ DISCO ELYSIUM
 // ============================================================================
 
 const INITIAL_DRIVES: DriveProfile[] = [
@@ -478,20 +556,17 @@ const INITIAL_DRIVES: DriveProfile[] = [
     features: "S.M.A.R.T., TRIM, VolatileWriteCache",
     healthStatus: "GOOD",
     healthPercent: 96,
-    moralePercent: 92,
     temperature: 41,
     totalReadsGB: 14820,
     totalWritesGB: 19450,
     powerOnCount: 1412,
     powerOnHours: 4890,
-    rotationRate: "---- (Твердотельный NVMe)",
-    introQuote:
-      "Кремниевый кристалл тихо пульсирует на частоте четырёх линий PCIe 4.0. Память свежа, дорожки чисты, ни одного потерянного воспоминания.",
+    rotationRate: "---- (SSD NVMe)",
     attributes: [
       {
         id: "01",
         name: "Critical Warning",
-        ruName: "Аварийный регистр флагов NVMe",
+        ruName: "Критические предупреждения контроллера",
         current: 100,
         worst: 100,
         threshold: 0,
@@ -502,20 +577,20 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ЭНЦИКЛОПЕДИЯ",
             category: "INT",
             difficulty: "Легко: Успех",
-            text: "Байт 01h в спецификации NVM Express — это битовая маска катастроф: износ резервных ячеек, перегрев свыше порога или блокировка записи. Сейчас все биты хранят ледяное молчание (00h).",
+            text: "Регистр 01h стандарта NVM Express хранит битовую маску катастроф: деградацию резервных блоков, тепловой пробой и аварийную блокировку записи. Все биты равны нулю.",
           },
           {
             skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
             category: "PSY",
             difficulty: "Средне: Успех",
-            text: "Внутри кристалла темно и спокойно. Никаких призраков удалённых системных папок.",
+            text: "Хоть что-то в этом проклятом мире ещё не развалилось на куски, Гарри. Внутри чёрного кремниевого прямоугольника царит хрупкий, звенящий покой.",
           },
         ],
       },
       {
         id: "02",
         name: "Composite Temperature",
-        ruName: "Составная температура кристалла",
+        ruName: "Температура кристалла памяти",
         current: 100,
         worst: 82,
         threshold: 85,
@@ -524,17 +599,17 @@ const INITIAL_DRIVES: DriveProfile[] = [
         status: "GOOD",
         voices: [
           {
-            skill: "ИНТЕРФЕЙС",
-            category: "MOT",
+            skill: "ЭЛЕКТРОХИМИЯ",
+            category: "FYS",
             difficulty: "Легко: Успех",
-            text: "41 °C — тёплая пульсация контроллера Elpis под медной пластиной радиатора. До теплового троттлинга ещё целых тридцать градусов запаса.",
+            text: "41 градус Цельсия! Температура горячечного бреда после трёх бутылок «Комодор Ред», но для кремниевого чипа — это сладкая утренняя нега под медным радиатором. Поддай ещё напряжения на шину, детка!",
           },
         ],
       },
       {
         id: "03",
         name: "Available Spare",
-        ruName: "Доступный резерв запасных блоков",
+        ruName: "Резервный пул запасных ячеек",
         current: 100,
         worst: 100,
         threshold: 10,
@@ -546,14 +621,14 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ЛОГИКА",
             category: "INT",
             difficulty: "Легко: Успех",
-            text: "Скрытый заводской пул резервных ячеек (Over-Provisioning) цел на 100%. Ни один блок флеш-памяти ещё не вышел из строя.",
+            text: "100% резервной области Over-Provisioning при критическом пороге 10%. Ни одна ячейка 128-слойной памяти V-NAND ещё не выведена из строя.",
           },
         ],
       },
       {
         id: "05",
         name: "Percentage Used",
-        ruName: "Выработка гарантированного ресурса (TBW)",
+        ruName: "Степень износа оксидного слоя (TBW)",
         current: 96,
         worst: 96,
         threshold: 0,
@@ -562,17 +637,17 @@ const INITIAL_DRIVES: DriveProfile[] = [
         status: "GOOD",
         voices: [
           {
-            skill: "ВОЛЯ",
-            category: "PSY",
-            difficulty: "Легко: Успех",
-            text: "Израсходовано всего 4% ресурса затворов. Этот накопитель переживёт и это расследование, и следующую зиму в Ревашоле.",
+            skill: "КОНЦЕПТУАЛИЗАЦИЯ",
+            category: "INT",
+            difficulty: "Средне: Успех",
+            text: "Каждый записанный гигабайт — это тысячи вольт, пробивающих туннельный диэлектрик. Кристалл медленно умирает от того, что запоминает твою жизнь. Пока он истратил лишь 4% своей души.",
           },
         ],
       },
       {
         id: "06",
         name: "Data Units Read",
-        ruName: "Прочитано единиц данных (по 512 КБ)",
+        ruName: "Всего прочитано блоков (Хост-чтение)",
         current: 100,
         worst: 100,
         threshold: 0,
@@ -580,17 +655,17 @@ const INITIAL_DRIVES: DriveProfile[] = [
         status: "GOOD",
         voices: [
           {
-            skill: "ВИЗУАЛЬНЫЙ АНАЛИЗ",
-            category: "INT",
-            difficulty: "Средне: Успех",
-            text: "Чтение не истощает оксидный слой транзисторов. 14.8 терабайт прочитанных протоколов прошли без единого пробоя.",
+            skill: "ИНТЕРФЕЙС",
+            category: "MOT",
+            difficulty: "Легко: Успех",
+            text: "14 820 гигабайт пронеслись по четырём линиям PCIe 4.0 со скоростью 7000 МБ/с. Твои глаза даже не успевают моргнуть, когда контроллер выплевывает гигабайты в оперативную память.",
           },
         ],
       },
       {
         id: "07",
         name: "Data Units Written",
-        ruName: "Записано единиц данных (Хост-запись)",
+        ruName: "Всего записано блоков (Хост-запись)",
         current: 100,
         worst: 100,
         threshold: 0,
@@ -598,17 +673,35 @@ const INITIAL_DRIVES: DriveProfile[] = [
         status: "GOOD",
         voices: [
           {
-            skill: "ИНТЕРФЕЙС",
-            category: "MOT",
-            difficulty: "Средне: Успех",
-            text: "19.4 ТБ записанных данных при гарантированном пороге 600 ТБ. Контроллер равномерно распределяет износ по всем банкам памяти.",
+            skill: "УЖАСАЮЩИЙ ГАЛСТУК",
+            category: "TIE",
+            difficulty: "Безумно: Успех",
+            text: "Девятнадцать с половиной терабайт компромата, старой музыки и недописанных отчётов, братишка! Запиши туда ещё пару гигабайт чистого диско!",
+          },
+        ],
+      },
+      {
+        id: "0C",
+        name: "Power Cycles",
+        ruName: "Число циклов включения питания",
+        current: 100,
+        worst: 100,
+        threshold: 0,
+        rawDec: 1412,
+        status: "GOOD",
+        voices: [
+          {
+            skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
+            category: "PSY",
+            difficulty: "Легко: Успех",
+            text: "1412 маленьких воскрешений из абсолютного ничто. Каждый раз, когда ты нажимаешь кнопку на корпусе, этот диск собирает твою реальность заново.",
           },
         ],
       },
       {
         id: "0D",
         name: "Unsafe Shutdowns",
-        ruName: "Аварийные отключения питания",
+        ruName: "Аварийные обрывы питания",
         current: 100,
         worst: 100,
         threshold: 0,
@@ -619,7 +712,25 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "БОЛЕВОЙ ПОРОГ",
             category: "FYS",
             difficulty: "Средне: Успех",
-            text: "19 раз питание обрывалось без предупреждения. Короткие микроудары тока по таблице трансляции адресов, после которых прошивка каждый раз собирала себя заново.",
+            text: "19 раз питание отрубалось наживую — как удар трубой по затылку в тёмном переулке за «Танцами в тряпье». Но таблица трансляции FTL выдержала.",
+          },
+        ],
+      },
+      {
+        id: "0E",
+        name: "Media and Data Integrity Errors",
+        ruName: "Неисправимые ошибки целостности данных",
+        current: 100,
+        worst: 100,
+        threshold: 0,
+        rawDec: 0,
+        status: "GOOD",
+        voices: [
+          {
+            skill: "ЛОГИКА",
+            category: "INT",
+            difficulty: "Легко: Успех",
+            text: "Ноль ошибок декодера LDPC. Память абсолютно герметична.",
           },
         ],
       },
@@ -639,20 +750,17 @@ const INITIAL_DRIVES: DriveProfile[] = [
     features: "S.M.A.R.T., NCQ, GPL",
     healthStatus: "CAUTION",
     healthPercent: 58,
-    moralePercent: 54,
     temperature: 52,
     totalReadsGB: 84120,
     totalWritesGB: 61390,
     powerOnCount: 5340,
     powerOnHours: 34820,
     rotationRate: "7200 RPM",
-    introQuote:
-      "Из глубины гермоблока доносится глухой металлический рокот. Шпиндель вращает магнитные блины уже четыре года подряд. В секторах завелась ржавчина.",
     attributes: [
       {
         id: "05",
         name: "Reallocated Sectors Count",
-        ruName: "Переназначенные сектора (Bad Blocks)",
+        ruName: "Число переназначенных секторов (Bad Blocks)",
         current: 140,
         worst: 140,
         threshold: 140,
@@ -663,20 +771,20 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "БОЛЕВОЙ ПОРОГ",
             category: "FYS",
             difficulty: "Сложно: Успех",
-            text: "Сорок восемь выжженных кратеров на магнитном слое! Контроллер вывел их из обращения и перенаправил чтение в резервную зону, но головкам приходится судорожно метаться через весь радиус пластины.",
+            text: "Сорок восемь выжженных микрократеров на зеркале магнитного диска! Контроллер отметил их как мёртвую зону и перенёс данные в резервный конец пластины. Слышишь этот судорожный хруст? Это головка мечется через весь диск.",
           },
           {
             skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
             category: "PSY",
             difficulty: "Средне: Успех",
-            text: "Именно так умирает человеческая память. Сначала выпадают имена и даты, потом — целые годы жизни.",
+            text: "Твоя собственная голова устроена точно так же, Гарри. Сорок восемь выжженных секторов — и вот ты уже не помнишь ни своего имени, ни лица женщины с запахом абрикосовой жвачки.",
           },
         ],
       },
       {
         id: "09",
         name: "Power-On Hours",
-        ruName: "Общее время наработки во включённом состоянии",
+        ruName: "Общее время работы шпинделя",
         current: 53,
         worst: 53,
         threshold: 0,
@@ -688,14 +796,14 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ТРЕПЕТ",
             category: "FYS",
             difficulty: "Средне: Успех",
-            text: "Тридцать четыре тысячи восемьсот двадцать часов под гул кулеров в прокуренном подвале участка. За окном сменилось шестнадцать сезонов дождей, а шпиндель ни разу не остановился.",
+            text: "Четыре года непрерывного вращения со скоростью 120 оборотов в секунду. Подшипник устал, но продолжает петь свою монотонную индустриальную колыбельную.",
           },
         ],
       },
       {
         id: "C5",
         name: "Current Pending Sector Count",
-        ruName: "Нестабильные сектора (кандидаты на замену)",
+        ruName: "Нестабильные сектора (ожидают замены)",
         current: 198,
         worst: 198,
         threshold: 0,
@@ -706,31 +814,13 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ЭНЦИКЛОПЕДИЯ",
             category: "INT",
             difficulty: "Сложно: Успех",
-            text: "Регистр C5h (14 секторов) — предвестник беды. Эти блоки уже не отдают контрольную сумму ECC при чтении. Любой файл, попавший в эти 14 секторов, намертво повесит поток ввода-вывода.",
+            text: "14 нестабильных секторов в регистре C5h. Контрольная сумма ECC в них уже не сходится. При следующем обращении к этим кластерам система зависнет в бесконечной попытке чтения.",
           },
           {
             skill: "АВТОРИТЕТ",
             category: "PSY",
             difficulty: "Легко: Успех",
-            text: "Немедленно эвакуируй отсюда ценные данные, детектив. Не жди, пока 14 нестабильных секторов превратятся в 1400.",
-          },
-        ],
-      },
-      {
-        id: "C7",
-        name: "UltraDMA CRC Error Count",
-        ruName: "Ошибки контрольной суммы шлейфа SATA",
-        current: 200,
-        worst: 199,
-        threshold: 0,
-        rawDec: 7,
-        status: "GOOD",
-        voices: [
-          {
-            skill: "ИНТЕРФЕЙС",
-            category: "MOT",
-            difficulty: "Легко: Успех",
-            text: "7 битых пакетов на физическом уровне SATA-кабеля. Подоткни разъём плотнее до щелчка металлической защёлки.",
+            text: "Скопируй отсюда всё важное немедленно. Не торгуйся с физикой ферромагнетиков.",
           },
         ],
       },
@@ -739,31 +829,28 @@ const INITIAL_DRIVES: DriveProfile[] = [
   {
     id: "pale_e",
     letter: "E:",
-    name: "КАТУШКА «ФОРТ-МОРАЛЬ» (СЕРОТА)",
+    name: "КАТУШКА «ДОЛОРЕС» (СЕРОТА)",
     model: "SEAGATE ST1000DM003-9YN162 1000.2 GB",
     capacityGB: 1000.2,
     firmware: "CC4B",
     serial: "Z1D4PALE0091",
     interfaceType: "Serial ATA",
-    transferMode: "SATA/150 | SATA/600 (Аварийный сброс)",
+    transferMode: "SATA/150 | SATA/600 (Деградация)",
     standard: "ATA8-ACS",
-    features: "S.M.A.R.T. (КРИТИЧЕСКИЙ ОТКАЗ)",
+    features: "S.M.A.R.T. (АВАРИЯ)",
     healthStatus: "BAD",
     healthPercent: 11,
-    moralePercent: 18,
     temperature: 63,
     totalReadsGB: 192400,
     totalWritesGB: 144800,
     powerOnCount: 11204,
     powerOnHours: 68410,
-    rotationRate: "7200 RPM (Биение вала)",
-    introQuote:
-      "Ритмичное «клац... клац... клац» режет тишину. Магнитный слой осыпается в бурую пыль. Серота уже внутри гермокамеры — она пожирает таблицу разделов.",
+    rotationRate: "7200 RPM (Клин шпинделя)",
     attributes: [
       {
         id: "05",
         name: "Reallocated Sectors Count",
-        ruName: "Переназначенные сектора (Таблица G-List переполнена)",
+        ruName: "Переназначенные сектора (Крах таблицы G-List)",
         current: 12,
         worst: 12,
         threshold: 36,
@@ -774,38 +861,20 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ЛОГИКА",
             category: "INT",
             difficulty: "Легко: Успех",
-            text: "Нормализованное здоровье атрибута (12) рухнуло ниже заводского порога смерти (Threshold = 36). Резервная таблица G-List переполнена (2418 секторов) — диску больше некуда прятать дыры.",
+            text: "Нормализованное значение (12) пробило порог отказа (Threshold = 36). 2418 мёртвых секторов переполнили заводскую таблицу дефектов G-List.",
           },
           {
-            skill: "СУМРАЧНЫЙ",
-            category: "FYS",
-            difficulty: "Легко: Успех",
-            text: "Он мёртв, братан. Он просто ещё по инерции крутит блины, потому что ты не выдернул из него разъём питания.",
-          },
-        ],
-      },
-      {
-        id: "0A",
-        name: "Spin Retry Count",
-        ruName: "Неудачные попытки раскрутки шпинделя",
-        current: 68,
-        worst: 60,
-        threshold: 97,
-        rawDec: 43,
-        status: "BAD",
-        voices: [
-          {
-            skill: "ИНТЕРФЕЙС",
-            category: "MOT",
-            difficulty: "Средне: Успех",
-            text: "43 срыва старта мотора. Загустевшая смазка клинит подшипник, а пусковой ток выжигает мосфеты на плате контроллера.",
+            skill: "УЖАСАЮЩИЙ ГАЛСТУК",
+            category: "TIE",
+            difficulty: "Безумно: Успех",
+            text: "Слышишь этот металлический скрежет, братан?! Это предсмертное диско на 7200 оборотов в минуту! Искры из-под магнитной головки!",
           },
         ],
       },
       {
         id: "C6",
         name: "Uncorrectable Sector Count",
-        ruName: "Неисправимые ошибки чтения (Потеря данных)",
+        ruName: "Неисправимые ошибки секторов (Распад в Сероту)",
         current: 41,
         worst: 41,
         threshold: 0,
@@ -816,7 +885,7 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
             category: "PSY",
             difficulty: "Невозможно: Успех",
-            text: "Шестьсот двенадцать фрагментов реальности растворились в белом шуме Сероты. Там были фотографии, старые курсовые и чьи-то голоса. Теперь там только нули.",
+            text: "Серота просочилась сквозь гермопрокладку. 612 секторов больше не принадлежат материальному миру — там лишь энтропия и радиошум чужих забытых писем.",
           },
         ],
       },
@@ -824,7 +893,7 @@ const INITIAL_DRIVES: DriveProfile[] = [
   },
 ];
 
-// Парсер отчёта CrystalDiskInfo / smartctl
+// Парсер отчёта CrystalDiskInfo
 function parseRealSmartReport(rawText: string): DriveProfile | null {
   const lines = rawText.split(/\r?\n/);
   if (lines.length < 3) return null;
@@ -906,73 +975,82 @@ function parseRealSmartReport(rawText: string): DriveProfile | null {
   return {
     id: `real_${Date.now()}`,
     letter: "R:",
-    name: `РЕАЛЬНЫЙ ДИСК ПК (${model.slice(0, 18)})`,
+    name: `РЕАЛЬНЫЙ ДИСК ПК`,
     model,
     capacityGB: 1000.0,
     firmware,
     serial,
     interfaceType,
     transferMode,
-    standard: "Реальный дамп S.M.A.R.T.",
-    features: "S.M.A.R.T., Аппаратная телеметрия",
+    standard: "Аппаратный S.M.A.R.T.",
+    features: "S.M.A.R.T., Телеметрия ядра",
     healthStatus,
     healthPercent,
-    moralePercent: 90,
     temperature,
     totalReadsGB,
     totalWritesGB,
     powerOnCount,
     powerOnHours,
-    rotationRate: "Аппаратный дамп",
+    rotationRate: "Физический носитель",
     isRealHardware: true,
-    introQuote: "Прямое подключение к контроллеру вашего компьютера установлено.",
     attributes: parsedAttrs.length > 0 ? parsedAttrs : INITIAL_DRIVES[0].attributes,
   };
 }
 
 // ============================================================================
-// 5. ГЛАВНЫЙ КОМПОНЕНТ «DISCO DISK ELYSIUM»
+// 5. ГЛАВНЫЙ КОМПОНЕНТ «CRYSTALDISKINFO // DISCO ELYSIUM SPECIAL EDITION»
 // ============================================================================
 
-export default function DiscoDiskElysium() {
+export default function CrystalDiskElysiumEdition() {
   const [drives, setDrives] = useState<DriveProfile[]>(INITIAL_DRIVES);
   const [activeDriveIdx, setActiveDriveIdx] = useState<number>(0);
-  const [artPiece, setArtPiece] = useState<ArtPieceId>("tequila");
+  const [visualTheme, setVisualTheme] = useState<VisualThemeId>("mind_explosion");
+  const [customArt1, setCustomArt1] = useState<string | null>(null);
+  const [customArt2, setCustomArt2] = useState<string | null>(null);
+
   const [rawFormat, setRawFormat] = useState<"HEX16" | "DEC10">("HEX16");
   const [selectedAttrId, setSelectedAttrId] = useState<string>("01");
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [tempOffset, setTempOffset] = useState<number>(0);
+  const [soundOn, setSoundOn] = useState<boolean>(true);
+  const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
 
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [importText, setImportText] = useState<string>("");
   const [lastDice, setLastDice] = useState<[number, number] | null>(null);
 
-  const [dialogueLog, setDialogueLog] = useState<DialogueEntry[]>([
+  const [thoughts, setThoughts] = useState<DialogueMessage[]>([
     {
-      id: "d1",
-      skill: "ДРЕВНИЙ РЕПТИЛЬНЫЙ МОЗГ",
-      category: "SYS",
-      text: "Нет ничего. Только тёплая тьма внутри алюминиевого корпуса и мерное шуршание электронов по шине PCI Express. А потом — разряд конденсатора. Подача +12 Вольт.",
+      id: "init_1",
+      skill: "КОНЦЕПТУАЛИЗАЦИЯ",
+      category: "INT",
+      difficulty: "Сложно: Успех",
+      text: "Из твоего виска вырывается протуберанец неоновой фуксии, кадмия и ультрафиолета. Первая производная памяти B', вторая производная распада B''... Перед тобой — кремниевая душа машины.",
     },
     {
-      id: "d2",
+      id: "init_2",
       skill: "ИНТЕРФЕЙС",
       category: "MOT",
       difficulty: "Легко: Успех",
-      text: "Радиокомпьютер участка №41 завершил опрос шины S.M.A.R.T. Перед тобой три катушки памяти. Нажми на любую строчку регистра в центре или брось кубики внизу, чтобы начать допрос.",
-    },
-    {
-      id: "d3",
-      skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
-      category: "PSY",
-      difficulty: "Средне: Успех",
-      text: "Осторожнее с диском [E:], детектив. От него веет Серотой и осыпавшимся оксидом железа.",
+      text: "Кликни по любой строке S.M.A.R.T. в таблице или перетащи свои любимые арты Disco Elysium прямо в это окно — они станут живым скином программы!",
     },
   ]);
 
-  const logBottomRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Автоподхват реальных дисков, если запущено внутри Electron-приложения (.exe / .deb / .dmg)
+  // Восстановление пользовательских артов из localStorage
+  useEffect(() => {
+    try {
+      const saved1 = localStorage.getItem("disco_custom_art_1");
+      const saved2 = localStorage.getItem("disco_custom_art_2");
+      if (saved1) {
+        setCustomArt1(saved1);
+        setVisualTheme("custom_1");
+      }
+      if (saved2) setCustomArt2(saved2);
+    } catch {}
+  }, []);
+
+  // Автоподхват реальных дисков в Electron (.exe / .deb / .dmg)
   useEffect(() => {
     const win = window as unknown as {
       electronSMART?: { getRealDrives: () => Promise<DriveProfile[]> };
@@ -990,10 +1068,6 @@ export default function DiscoDiskElysium() {
     }
   }, []);
 
-  useEffect(() => {
-    logBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [dialogueLog]);
-
   const activeDrive = drives[activeDriveIdx] || drives[0];
   const effectiveTemp = activeDrive.temperature + tempOffset;
 
@@ -1003,964 +1077,1052 @@ export default function DiscoDiskElysium() {
     return "GOOD";
   }, [activeDrive.healthStatus, effectiveTemp]);
 
-  const toggleSound = () => {
-    audioEngine.enabled = !soundEnabled;
-    setSoundEnabled(!soundEnabled);
+  // Загрузка своих артов (например, image_542721.jpg и image_54817e.jpg) через кнопку или Drag & Drop
+  const handleArtFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    Array.from(files)
+      .slice(0, 2)
+      .forEach((file, idx) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const dataUrl = String(e.target?.result || "");
+          if (!dataUrl) return;
+          if (idx === 0 && (!customArt1 || visualTheme !== "custom_1")) {
+            setCustomArt1(dataUrl);
+            setVisualTheme("custom_1");
+            try {
+              localStorage.setItem("disco_custom_art_1", dataUrl);
+            } catch {}
+          } else {
+            setCustomArt2(dataUrl);
+            setVisualTheme("custom_2");
+            try {
+              localStorage.setItem("disco_custom_art_2", dataUrl);
+            } catch {}
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    soundFX.playPrismChord(true);
   };
+
+  const activeCustomUrl =
+    visualTheme === "custom_1"
+      ? customArt1
+      : visualTheme === "custom_2"
+      ? customArt2
+      : null;
 
   const handleSelectDrive = (idx: number) => {
     const drv = drives[idx];
     setActiveDriveIdx(idx);
     setTempOffset(0);
-    audioEngine.playActuatorClick(drv.healthStatus);
+    soundFX.playClick(drv.healthStatus);
 
-    if (drv.healthStatus === "BAD") setArtPiece("inland");
-    else if (drv.healthStatus === "CAUTION") setArtPiece("interfacing");
-
-    setDialogueLog((prev) => [
-      ...prev,
+    setThoughts([
       {
-        id: `sel_${Date.now()}`,
-        skill: `КОММУТАТОР КАНАЛОВ // ТОМ [${drv.letter}]`,
-        category: "SYS",
-        text: `${drv.model} (${drv.capacityGB} ГБ). ${drv.introQuote}`,
+        id: `d_${Date.now()}`,
+        skill: drv.healthStatus === "BAD" ? "ВНУТРЕННЯЯ ИМПЕРИЯ" : "ИНТЕРФЕЙС",
+        category: drv.healthStatus === "BAD" ? "PSY" : "MOT",
+        difficulty: "Средне: Успех",
+        text:
+          drv.healthStatus === "GOOD"
+            ? `Канал переключён на [${drv.letter}] ${drv.model}. Четыре линии PCIe 4.0 поют в унисон, ресурс 96%.`
+            : drv.healthStatus === "CAUTION"
+            ? `Внимание, детектив: на диске [${drv.letter}] обнаружены 48 переназначенных секторов и 14 нестабильных кластеров!`
+            : `ТРЕВОГА! Катушка [${drv.letter}] поглощена Серотой (здоровье 11%, 2418 битых секторов). Слышен предсмертный стук механики!`,
       },
     ]);
   };
 
-  const handleInspectAttribute = (attr: SmartAttribute) => {
+  const handleSelectAttribute = (attr: SmartAttribute) => {
     setSelectedAttrId(attr.id);
-    audioEngine.playActuatorClick(attr.status);
-
-    const newLines: DialogueEntry[] = [
-      {
-        id: `you_${Date.now()}`,
-        skill: "ТЫ",
-        category: "YOU",
-        text: `«Проверить регистр [${attr.id}h] — ${attr.name} (${attr.ruName})»`,
-      },
-      ...attr.voices.map((v, idx) => ({
-        id: `v_${Date.now()}_${idx}`,
+    soundFX.playClick(attr.status);
+    setThoughts(
+      attr.voices.map((v, i) => ({
+        id: `v_${Date.now()}_${i}`,
         skill: v.skill,
         category: v.category,
         difficulty: v.difficulty,
-        checkResult: "SUCCESS" as const,
         text: v.text,
-      })),
-    ];
-
-    setDialogueLog((prev) => [...prev, ...newLines]);
+      }))
+    );
   };
 
-  const handleRollWhiteCheck = () => {
+  const handleRollDice = () => {
     const d1 = Math.floor(Math.random() * 6) + 1;
     const d2 = Math.floor(Math.random() * 6) + 1;
     setLastDice([d1, d2]);
+    const bonus = effectiveHealth === "GOOD" ? 3 : effectiveHealth === "CAUTION" ? 1 : -1;
+    const total = d1 + d2 + bonus;
+    const success = (d1 === 6 && d2 === 6) || (!(d1 === 1 && d2 === 1) && total >= 8);
+    soundFX.playPrismChord(success);
 
-    const mod = effectiveHealth === "GOOD" ? 3 : effectiveHealth === "CAUTION" ? 1 : -1;
-    const sum = d1 + d2 + mod;
-    const success = (d1 === 6 && d2 === 6) || (!(d1 === 1 && d2 === 1) && sum >= 8);
-
-    audioEngine.playDiceRoll(success);
-
-    setDialogueLog((prev) => [
-      ...prev,
+    setThoughts([
       {
-        id: `you_roll_${Date.now()}`,
-        skill: "ТЫ",
-        category: "YOU",
-        text: `🎲 [ИНТЕРФЕЙС: Белая проверка — Сложность 8] Приложить ладонь к корпусу ${activeDrive.letter} и прослушать резонанс дорожек.`,
+        id: `r1_${Date.now()}`,
+        skill: `БЕЛАЯ ПРОВЕРКА // ИНТЕРФЕЙС [Кубики: ${d1} + ${d2} (мод. ${
+          bonus >= 0 ? `+${bonus}` : bonus
+        }) = ${total} против 8]`,
+        category: "MOT",
+        difficulty: success ? "КРИТИЧЕСКИЙ УСПЕХ" : "ПРОВАЛ ПРОВЕРКИ",
+        text: success
+          ? "Твой разум пробивает оболочку операционной системы и ныряет прямо в микрокод контроллера! Ты видишь карту физических блоков как ночной Ревашоль с высоты птичьего полёта: все уязвимые сектора помечены и изолированы."
+          : "Перед глазами взрываются пурпурно-золотые пятна. Ты забыл, что такое LBA-адресация, почему ты сидишь перед этим монитором и как зовут того парня в оранжевой куртке.",
       },
       {
-        id: `res_roll_${Date.now()}`,
-        skill: `ИНТЕРФЕЙС [Бросок: ${d1} + ${d2} ${mod >= 0 ? `+ ${mod}` : `- ${Math.abs(mod)}`} = ${sum}]`,
-        category: "MOT",
-        difficulty: success ? "УСПЕХ" : "ПРОВАЛ",
-        checkResult: success ? "SUCCESS" : "FAILURE",
+        id: `r2_${Date.now()}`,
+        skill: "УЖАСАЮЩИЙ ГАЛСТУК",
+        category: "TIE",
+        difficulty: "Безумно: Успех",
         text: success
-          ? effectiveHealth === "GOOD"
-            ? "Ты закрываешь глаза и сливаешься с шиной данных. Поток команд NVMe чист, как горный воздух над Инсулиндией: ни одной задержки чтения свыше 50 микросекунд."
-            : "Пальцы улавливают предательскую дрожь шагового актуатора на дорожке 0x004F1A! Ты вовремя посылаешь команду принудительного сброса кэша (Flush Cache) — таблица разделов спасена от разрушения."
-          : "Шум кулеров и гул трансформатора сливаются в неразборчивую какофонию. Твоя рука соскальзывает со стальной крышки корпуса, оставляя жирный след на заводской пломбе.",
+          ? "ДА-А-А, БРАТАН! Семь тысяч мегабайт в секунду чистого электрического экстаза!"
+          : "Забей на сектора, Гарри! Давай просто разгоним этот чип до 85 градусов и посмотрим, как красиво он задымится!",
       },
     ]);
+  };
+
+  const copySmartReport = () => {
+    const lines = [
+      `CrystalDiskInfo // Disco Elysium Edition`,
+      `Model : ${activeDrive.model}`,
+      `Firmware : ${activeDrive.firmware}`,
+      `Serial Number : ${activeDrive.serial}`,
+      `Health Status : ${activeDrive.healthStatus} (${activeDrive.healthPercent} %)`,
+      `Temperature : ${effectiveTemp} C`,
+      `Power On Hours : ${activeDrive.powerOnHours}`,
+      `-- S.M.A.R.T. --------------------------------------------------------------`,
+      ...activeDrive.attributes.map(
+        (a) =>
+          `${a.id} ${String(a.current).padStart(3)} ${String(a.worst).padStart(3)} ${String(
+            a.threshold
+          ).padStart(3)} ${a.rawDec.toString(16).toUpperCase().padStart(12, "0")} ${a.name}`
+      ),
+    ];
+    navigator.clipboard.writeText(lines.join("\n"));
+    soundFX.playClick("GOOD");
   };
 
   const handleImportSubmit = () => {
     const parsed = parseRealSmartReport(importText);
     if (!parsed) return;
-    const updated = [parsed, ...drives];
-    setDrives(updated);
+    setDrives([parsed, ...drives]);
     setActiveDriveIdx(0);
     setShowImportModal(false);
     setImportText("");
-    audioEngine.playDiceRoll(true);
-
-    setDialogueLog((prev) => [
-      ...prev,
-      {
-        id: `imp_${Date.now()}`,
-        skill: "ЭНЦИКЛОПЕДИЯ",
-        category: "INT",
-        difficulty: "Легко: Успех",
-        text: `Свежая перфокарта принята! Накопитель «${parsed.model}» (${parsed.temperature} °C, здоровье ${parsed.healthPercent}%) подключён к каналу [R:].`,
-      },
-    ]);
+    soundFX.playPrismChord(true);
   };
 
-  const formatRaw = (dec: number) =>
-    rawFormat === "DEC10" ? dec.toLocaleString("ru-RU") : dec.toString(16).toUpperCase().padStart(12, "0");
-
-  const getSkillColor = (cat: DialogueEntry["category"]) => {
+  const getSkillColor = (cat: DialogueMessage["category"]) => {
     switch (cat) {
       case "INT":
-        return "#48bfe3"; // Интеллект (Церулеум)
+        return "#38d9ff"; // Электрический голубой (Интеллект)
       case "PSY":
-        return "#9d65c9"; // Психика (Аметист)
+        return "#c77dff"; // Ультрафиолет (Психика)
       case "FYS":
-        return "#e0485a"; // Физика (Красный кармин)
+        return "#ff2a85"; // Неоновая фуксия/кармин (Физика/Электрохимия)
       case "MOT":
-        return "#f2a93b"; // Моторика (Кадмий жёлто-охристый)
-      case "YOU":
-        return "#e8dec8";
+        return "#ffbe0b"; // Золотой кадмий (Моторика)
+      case "TIE":
+        return "#ff5400"; // Огненно-оранжевый (Галстук)
       default:
-        return "#c29b61";
+        return "#f8f9fa";
     }
   };
 
-  // Расчёт сегментов Здоровья (10 делений) и Морали (10 делений) как в HUD Disco Elysium
-  const healthPips = Math.max(1, Math.round(activeDrive.healthPercent / 10));
-  const moralePips = Math.max(1, Math.round(activeDrive.moralePercent / 10));
+  const formatRaw = (dec: number) =>
+    rawFormat === "DEC10"
+      ? dec.toLocaleString("ru-RU")
+      : dec.toString(16).toUpperCase().padStart(12, "0");
 
   return (
-    <div className="elysium-viewport">
-      {/* SVG-ФИЛЬТР ФАКТУРЫ МАСЛЯНОГО ХОЛСТА И КРАКЕЛЮРА */}
-      <svg style={{ position: "absolute", width: 0, height: 0 }}>
-        <filter id="canvas-grain">
-          <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="3" result="noise" />
-          <feColorMatrix
-            type="matrix"
-            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.045 0"
-          />
-          <feComposite in2="SourceGraphic" in="noise" operator="in" />
-        </filter>
-      </svg>
-
-      {/* АВТОНОМНЫЕ СТИЛИ И ПОДГРУЗКА ШРИФТОВ OSWALD + CORMORANT GARAMOND */}
+    <div
+      className="cdi-disco-shell"
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDraggingOver(true);
+      }}
+      onDragLeave={() => setIsDraggingOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDraggingOver(false);
+        handleArtFiles(e.dataTransfer.files);
+      }}
+    >
+      {/* СТИЛИ ТОЧНОЙ АРХИТЕКТУРЫ CRYSTALDISKINFO SPECIAL EDITION + ПСИХОДЕЛИКА DISCO ELYSIUM */}
       <style
         dangerouslySetInnerHTML={{
           __html: `
-        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,400;1,600&family=JetBrains+Mono:wght@400;600;700&family=Oswald:wght@500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Oswald:wght@600;700&display=swap');
 
         * { box-sizing: border-box; }
         body, html {
           margin: 0;
           padding: 0;
-          background-color: #0d0b09;
-          color: #e8dec8;
-          font-family: 'Cormorant Garamond', Georgia, serif;
-          font-size: 16px;
+          background: #07040d;
+          color: #f8f5f0;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+          font-size: 13px;
           -webkit-font-smoothing: antialiased;
         }
         .font-oswald {
-          font-family: 'Oswald', Impact, sans-serif;
+          font-family: 'Oswald', sans-serif;
           text-transform: uppercase;
-          letter-spacing: 0.06em;
+          letter-spacing: 0.05em;
+        }
+        .font-serif-disco {
+          font-family: 'Cormorant Garamond', Georgia, serif;
         }
         .font-mono {
           font-family: 'JetBrains Mono', Consolas, monospace;
           font-variant-numeric: tabular-nums;
         }
-        .elysium-viewport {
+
+        /* Внешний фон с атмосферным свечением */
+        .cdi-disco-shell {
           min-height: 100vh;
           display: flex;
-          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 16px;
           position: relative;
+          overflow-x: hidden;
           background:
-            radial-gradient(circle at 14% 22%, rgba(217, 83, 38, 0.22), transparent 38%),
-            radial-gradient(circle at 48% 10%, rgba(43, 110, 104, 0.24), transparent 42%),
-            radial-gradient(circle at 82% 78%, rgba(123, 82, 171, 0.16), transparent 45%),
-            linear-gradient(180deg, #16120e 0%, #0d0b09 100%);
-        }
-        /* Зернистая масляная плёнка поверх всего экрана */
-        .elysium-viewport::after {
-          content: "";
-          position: fixed;
-          inset: 0;
-          pointer-events: none;
-          z-index: 40;
-          background-image: radial-gradient(rgba(232, 222, 200, 0.04) 1px, transparent 0);
-          background-size: 3px 3px;
+            radial-gradient(circle at 20% 25%, rgba(255, 0, 127, 0.25), transparent 45%),
+            radial-gradient(circle at 80% 20%, rgba(0, 245, 212, 0.18), transparent 45%),
+            radial-gradient(circle at 50% 85%, rgba(255, 93, 0, 0.2), transparent 50%),
+            #06030a;
         }
 
-        /* ВЕРХНЯЯ ШАПКА В СТИЛЕ ДОСЬЕ МАРТИНЕЗА */
-        .martinaise-topbar {
-          background: linear-gradient(90deg, #171310 0%, #241b15 50%, #14110e 100%);
-          border-bottom: 2px solid #8c6d46;
-          padding: 10px 24px;
+        /* ГЛАВНОЕ ОКНО В ФОРМАТЕ CRYSTALDISKINFO SPECIAL EDITION (как Kurei Kei Edition на фото) */
+        .cdi-window {
+          width: 100%;
+          max-width: 1260px;
+          min-height: 820px;
+          border-radius: 10px;
+          overflow: hidden;
+          position: relative;
           display: flex;
-          flex-wrap: wrap;
+          flex-direction: column;
+          border: 1.5px solid rgba(255, 255, 255, 0.22);
+          box-shadow:
+            0 25px 70px rgba(0, 0, 0, 0.9),
+            0 0 45px rgba(255, 0, 127, 0.22),
+            0 0 80px rgba(0, 229, 255, 0.14);
+          background: #0d0818;
+        }
+
+        /* Верхняя строка меню как в нативном окне CrystalDiskInfo */
+        .cdi-menubar {
+          height: 38px;
+          background: rgba(12, 8, 22, 0.92);
+          backdrop-filter: blur(12px);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+          padding: 0 16px;
+          display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 14px;
-          box-shadow: 0 10px 30px rgba(0,0,0,0.85);
-          z-index: 20;
+          z-index: 25;
         }
-        .brand-cluster {
+        .menu-links {
           display: flex;
           align-items: center;
-          gap: 14px;
-        }
-        .insulindian-seal {
-          padding: 5px 12px;
-          background: linear-gradient(135deg, #d95326, #9e2a1b);
-          color: #fff5e4;
-          font-weight: 700;
-          font-size: 13px;
-          border: 1px solid #f2b441;
-          box-shadow: 3px 3px 0px #090706;
-        }
-        .main-heading {
-          font-size: 22px;
-          font-weight: 700;
-          color: #f5ebd6;
-          margin: 0;
-          text-shadow: 2px 2px 0px #000;
-        }
-
-        /* Карточки выбора дисков (как потрёпанные кассеты/дела) */
-        .cassette-strip {
-          display: flex;
+          gap: 6px;
           flex-wrap: wrap;
-          gap: 10px;
         }
-        .cassette-tab {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 6px 14px;
-          background: #1c1713;
-          border: 1px solid #57442e;
-          color: #c7b69e;
+        .menu-btn {
+          background: transparent;
+          border: 1px solid transparent;
+          color: #e2dcf0;
+          padding: 4px 10px;
+          border-radius: 5px;
+          font-size: 12px;
+          font-weight: 500;
           cursor: pointer;
-          transition: all 0.16s ease;
-          box-shadow: 3px 3px 0px rgba(0,0,0,0.6);
+          transition: all 0.15s;
         }
-        .cassette-tab:hover {
-          border-color: #d99326;
-          transform: translateY(-1px);
-        }
-        .cassette-tab.active {
-          background: linear-gradient(135deg, #3d2417 0%, #1f2b28 100%);
-          border: 1.5px solid #f2b441;
+        .menu-btn:hover {
+          background: rgba(255, 0, 127, 0.22);
+          border-color: rgba(255, 0, 127, 0.55);
           color: #fff;
-          box-shadow: 0 0 18px rgba(242, 180, 65, 0.28), 3px 3px 0px #000;
+        }
+        .menu-btn-accent {
+          background: linear-gradient(90deg, rgba(255, 0, 127, 0.3), rgba(255, 107, 26, 0.3));
+          border: 1px solid rgba(255, 190, 11, 0.6);
+          color: #ffbe0b;
+          font-weight: 700;
         }
 
-        /* Кнопки с экспрессионистской жёсткой тенью */
-        . painterly-btn {
-          padding: 7px 14px;
-          background: #241d17;
-          border: 1.5px solid #8c6d46;
-          color: #f0e6d2;
-          font-family: 'Oswald', sans-serif;
-          font-size: 12.5px;
-          letter-spacing: 0.06em;
-          text-transform: uppercase;
-          cursor: pointer;
-          box-shadow: 3px 3px 0px #090806;
-          transition: all 0.14s ease;
-        }
-        .painterly-btn:hover {
-          background: #d95326;
-          color: #fff;
-          border-color: #f5ebd6;
-          transform: translate(-1px, -1px);
-          box-shadow: 4px 4px 0px #090806;
-        }
-
-        /* ГЛАВНАЯ ТРЁХКОЛОНОЧНАЯ СЦЕНА DISCO ELYSIUM:
-           1. Левый столб: Портрет маслом + Шкалы Здоровья/Морали + Навыки-индикаторы
-           2. Центр: Паспорт диска и таблица регистров S.M.A.R.T.
-           3. Правый столб: Классическая тёмная лента диалога Disco Elysium */
-        .stage-grid {
+        /* Тело окна: СЛЕВА — ПОЛНОРОСТОВОЙ АРТ (410px), СПРАВА — ПОЛУПРОЗРАЧНЫЙ СТЕКЛЯННЫЙ ИНТЕРФЕЙС CDI */
+        .cdi-body {
           flex: 1;
           display: grid;
-          grid-template-columns: 280px 1fr 430px;
-          min-height: calc(100vh - 68px);
-        }
-        @media (max-width: 1280px) {
-          .stage-grid {
-            grid-template-columns: 260px 1fr 370px;
-          }
+          grid-template-columns: 410px 1fr;
+          position: relative;
         }
         @media (max-width: 1024px) {
-          .stage-grid {
+          .cdi-body {
             grid-template-columns: 1fr;
           }
         }
 
-        /* 1. ЛЕВЫЙ СТОЛБ (HUD ПОРТРЕТА И MORALE/HEALTH BARS) */
-        .left-hud {
-          background: linear-gradient(180deg, rgba(24, 19, 15, 0.94), rgba(14, 11, 9, 0.98));
-          border-right: 2px solid #57442e;
-          padding: 18px;
-          display: flex;
-          flex-direction: column;
-          gap: 14px;
-        }
-        /* Шкалы ЗДОРОВЬЕ (Красная) и МОРАЛЬ (Синяя) из Disco Elysium */
-        .vital-bars {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          padding: 10px 12px;
-          background: #14100d;
-          border: 1px solid #57442e;
-          box-shadow: inset 0 0 12px rgba(0,0,0,0.8);
-        }
-        .pip-row {
-          display: grid;
-          grid-template-columns: repeat(10, 1fr);
-          gap: 3px;
-          height: 10px;
-        }
-        .pip-cell {
-          background: #26201b;
-          border: 1px solid #000;
-        }
-        .pip-health-on {
-          background: linear-gradient(180deg, #ff5c4d, #b8252f);
-          box-shadow: 0 0 6px rgba(224, 72, 90, 0.6);
-        }
-        .pip-morale-on {
-          background: linear-gradient(180deg, #6ec1e4, #2b6ca3);
-          box-shadow: 0 0 6px rgba(72, 191, 227, 0.6);
-        }
-
-        /* Рама картины маслом */
-        .oil-frame {
-          position: relative;
-          height: 290px;
-          border: 3px solid #a68253;
-          outline: 1px solid #2b2117;
-          box-shadow: 6px 8px 0px #080605, 0 0 28px rgba(0,0,0,0.85);
-          background: #0e0c0a;
-          overflow: hidden;
-        }
-        .oil-caption {
+        /* Размытая копия арта на весь задний план под стеклом справа (чтобы цвета светились сквозь таблицу!) */
+        .ambient-art-bleed {
           position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 0;
-          padding: 6px 10px;
-          background: linear-gradient(0deg, rgba(10,8,6,0.95) 0%, rgba(10,8,6,0.6) 75%, transparent 100%);
-          text-align: center;
-          font-size: 12px;
-          color: #f2b441;
+          inset: 0;
+          z-index: 0;
+          opacity: 0.26;
+          filter: blur(36px) saturate(1.8);
+          pointer-events: none;
         }
 
-        /* Две карточки-печати (ТЕХСОСТОЯНИЕ и ТЕМПЕРАТУРА) в стиле ромбов навыков */
-        .tarot-card {
-          padding: 12px 14px;
-          border: 2px solid #8c6d46;
-          box-shadow: 4px 4px 0px #080605;
+        /* Левая витрина персонажа (как в Kurei Kei Edition) */
+        .left-art-showcase {
           position: relative;
+          z-index: 10;
+          border-right: 1px solid rgba(255, 255, 255, 0.18);
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
           overflow: hidden;
+          min-height: 760px;
         }
-        .tarot-good {
-          background: linear-gradient(135deg, #173632 0%, #1f4e48 60%, #122422 100%);
-          border-color: #68c7b7;
+        .art-canvas-holder {
+          position: absolute;
+          inset: 0;
+          z-index: 1;
         }
-        .tarot-caution {
-          background: linear-gradient(135deg, #422310 0%, #7d4018 60%, #261409 100%);
-          border-color: #f2a93b;
-        }
-        .tarot-bad {
-          background: linear-gradient(135deg, #470f16 0%, #8a1c27 60%, #24070b 100%);
-          border-color: #ff4d5e;
-        }
-
-        /* 2. ЦЕНТРАЛЬНАЯ ЧАСТЬ (ДОСЬЕ ПАСПОРТА + S.M.A.R.T.) */
-        .center-dossier {
-          padding: 20px 24px;
+        .art-overlay-top {
+          position: relative;
+          z-index: 5;
+          padding: 12px 14px;
+          background: linear-gradient(180deg, rgba(8, 5, 16, 0.82) 0%, transparent 100%);
           display: flex;
-          flex-direction: column;
-          gap: 18px;
-          overflow-y: auto;
+          flex-wrap: wrap;
+          gap: 6px;
         }
-        .dossier-card {
-          background:
-            linear-gradient(135deg, rgba(33, 27, 22, 0.94), rgba(20, 17, 14, 0.96));
-          border: 1.5px solid #6e5536;
-          box-shadow: 6px 6px 0px #080705;
-          padding: 18px 20px;
-        }
-        .passport-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px 24px;
-          margin-top: 12px;
-        }
-        @media (max-width: 720px) {
-          .passport-grid { grid-template-columns: 1fr; }
-        }
-        .passport-line {
-          display: flex;
-          justify-content: space-between;
-          align-items: baseline;
-          border-bottom: 1px dotted rgba(166, 130, 83, 0.35);
-          padding: 4px 0;
-        }
-
-        /* Таблица регистров S.M.A.R.T. с полосами износа */
-        .smart-table-wrap {
-          background: rgba(20, 16, 13, 0.95);
-          border: 1.5px solid #6e5536;
-          box-shadow: 6px 6px 0px #080705;
-          flex: 1;
-        }
-        .disco-table {
-          width: 100%;
-          border-collapse: collapse;
-        }
-        .disco-table th {
-          background: #241c16;
-          color: #d4b88c;
-          font-family: 'Oswald', sans-serif;
-          font-size: 12px;
-          letter-spacing: 0.07em;
-          text-transform: uppercase;
-          text-align: left;
-          padding: 10px 12px;
-          border-bottom: 2px solid #6e5536;
-        }
-        .disco-table td {
-          padding: 9px 12px;
-          border-bottom: 1px solid rgba(110, 85, 54, 0.28);
-        }
-        .disco-table tr {
-          cursor: pointer;
-          transition: background 0.12s;
-        }
-        .disco-table tr:hover td {
-          background: rgba(217, 83, 38, 0.18);
-        }
-        .disco-table tr.active-attr td {
-          background: linear-gradient(90deg, rgba(217, 83, 38, 0.28), rgba(242, 180, 65, 0.14));
-          border-top: 1px solid #f2b441;
-          border-bottom: 1px solid #f2b441;
-        }
-
-        /* 3. ПРАВЫЙ СТОЛБ — КАНОНИЧНАЯ ТЁМНАЯ ЛЕНТА ДИАЛОГА DISCO ELYSIUM */
-        .right-tape {
-          background:
-            radial-gradient(circle at 50% 0%, rgba(217, 83, 38, 0.12), transparent 35%),
-            linear-gradient(180deg, #120f0c 0%, #0b0908 100%);
-          border-left: 2px solid #6e5536;
-          display: flex;
-          flex-direction: column;
-          height: calc(100vh - 68px);
-          position: sticky;
-          top: 68px;
-          box-shadow: -12px 0 36px rgba(0,0,0,0.85);
-        }
-        @media (max-width: 1024px) {
-          .right-tape {
-            height: 620px;
-            position: static;
-          }
-        }
-        .tape-header {
-          padding: 12px 20px;
-          background: #1b1511;
-          border-bottom: 1.5px solid #57442e;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .tape-scroll {
-          flex: 1;
-          overflow-y: auto;
-          padding: 22px 24px;
-          display: flex;
-          flex-direction: column;
-          gap: 18px;
-        }
-        .dialogue-block {
-          padding-left: 14px;
-          border-left: 3px solid #d95326;
-          animation: slideUp 0.22s ease-out;
-        }
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .dialogue-actor {
-          font-family: 'Oswald', sans-serif;
-          font-size: 13.5px;
+        .skin-pill {
+          padding: 5px 10px;
+          border-radius: 99px;
+          font-size: 11px;
           font-weight: 700;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
+          background: rgba(15, 10, 28, 0.78);
+          border: 1px solid rgba(255, 255, 255, 0.25);
+          color: #e2dcf0;
+          cursor: pointer;
+          backdrop-filter: blur(8px);
+          transition: all 0.15s;
         }
-        .dialogue-check-tag {
-          font-family: 'Cormorant Garamond', serif;
-          font-style: italic;
-          font-size: 14px;
-          color: #a89984;
-          margin-left: 8px;
+        .skin-pill:hover, .skin-pill.active {
+          background: linear-gradient(90deg, #ff007f, #ff6b1a);
+          border-color: #ffbe0b;
+          color: #fff;
+          box-shadow: 0 0 15px rgba(255, 0, 127, 0.6);
         }
-        .dialogue-prose {
-          margin-top: 4px;
-          font-size: 17.5px;
-          line-height: 1.48;
-          color: #f2ead8;
-        }
-        /* Красная полоса выбора действия внизу ленты (как в Disco Elysium) */
-        .red-choice-box {
-          padding: 16px 20px;
-          background: #17120e;
-          border-top: 2px solid #6e5536;
+
+        /* Нижний блок мыслей Гарри прямо поверх нижней трети арта и под таблицей */
+        .art-overlay-bottom {
+          position: relative;
+          z-index: 5;
+          margin-top: auto;
+          padding: 18px 16px 14px 16px;
+          background: linear-gradient(0deg, rgba(7, 4, 15, 0.96) 0%, rgba(12, 7, 24, 0.84) 78%, transparent 100%);
           display: flex;
           flex-direction: column;
           gap: 10px;
         }
-        .red-dialogue-option {
-          width: 100%;
-          text-align: left;
-          padding: 11px 14px;
-          background: linear-gradient(90deg, #7a1c18 0%, #4a110e 100%);
-          border: 1.5px solid #f2b441;
-          color: #fff5e4;
-          font-family: 'Cormorant Garamond', serif;
-          font-size: 16.5px;
-          font-weight: 700;
-          cursor: pointer;
-          box-shadow: 4px 4px 0px #060504;
-          transition: all 0.15s ease;
+
+        /* ПРАВАЯ ЧАСТЬ: КЛАССИЧЕСКИЙ ИНТЕРФЕЙС CRYSTALDISKINFO ПОВЕРХ МАТОВОГО СТЕКЛА */
+        .right-cdi-glass {
+          position: relative;
+          z-index: 10;
+          background: rgba(14, 10, 26, 0.68);
+          backdrop-filter: blur(18px);
+          padding: 14px 20px 18px 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
         }
-        .red-dialogue-option:hover {
-          background: linear-gradient(90deg, #b82b24 0%, #7a1c18 100%);
-          transform: translateX(3px);
+
+        /* 1. Вкладки дисков сверху (как "Хорошо / 40 °C / C: D:" в Kurei Kei Edition) */
+        .cdi-drive-tabs {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+          padding-bottom: 10px;
+        }
+        .cdi-tab-item {
+          min-width: 128px;
+          padding: 6px 14px;
+          border-radius: 6px;
+          background: rgba(255, 255, 255, 0.06);
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          color: #e2dcf0;
+          cursor: pointer;
+          text-align: center;
+          transition: all 0.15s;
+        }
+        .cdi-tab-item:hover {
+          background: rgba(255, 255, 255, 0.12);
+        }
+        .cdi-tab-item.active {
+          background: linear-gradient(180deg, rgba(0, 229, 255, 0.25), rgba(131, 56, 236, 0.35));
+          border: 1.5px solid #00f5d4;
+          box-shadow: 0 0 18px rgba(0, 245, 212, 0.35);
+          color: #fff;
+        }
+
+        /* 2. Крупный заголовок модели накопителя */
+        .cdi-model-banner {
+          text-align: center;
+          padding: 6px 12px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .cdi-model-title {
+          margin: 0;
+          font-size: 23px;
+          font-weight: 700;
+          letter-spacing: 0.01em;
+          color: #ffffff;
+          text-shadow: -1.5px 0 #ff007f, 1.5px 0 #00f5d4;
+        }
+
+        /* 3. Двухколоночный паспорт диска + центральный тотем (как на фото Kurei Kei Edition) */
+        .cdi-passport-layout {
+          display: grid;
+          grid-template-columns: 1fr 92px 1fr;
+          gap: 12px;
+          align-items: center;
+        }
+        @media (max-width: 780px) {
+          .cdi-passport-layout {
+            grid-template-columns: 1fr;
+          }
+        }
+        .cdi-field-list {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+        }
+        .cdi-field-row {
+          display: grid;
+          grid-template-columns: 135px 1fr;
+          align-items: center;
+          gap: 8px;
+        }
+        .cdi-field-label {
+          text-align: right;
+          font-size: 12px;
+          color: #cbd5e1;
+          white-space: nowrap;
+        }
+        .cdi-field-box {
+          padding: 4px 10px;
+          border-radius: 5px;
+          background: rgba(8, 5, 18, 0.62);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          color: #ffffff;
+          font-size: 12.5px;
+          font-weight: 600;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        /* Центральный тотем между колонками паспорта (Говорящий Галстук / Бросок 2d6) */
+        .center-totem-btn {
+          width: 88px;
+          height: 126px;
+          margin: 0 auto;
+          border-radius: 10px;
+          background: linear-gradient(135deg, rgba(255, 0, 127, 0.28), rgba(255, 107, 26, 0.32));
+          border: 1.5px solid #ffbe0b;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          cursor: pointer;
+          box-shadow: 0 0 20px rgba(255, 0, 127, 0.35);
+          transition: all 0.18s;
+          color: #fff;
+        }
+        .center-totem-btn:hover {
+          transform: scale(1.05) rotate(-2deg);
+          box-shadow: 0 0 28px rgba(255, 190, 11, 0.65);
+        }
+
+        /* 4. Две широкие горизонтальные капсулы ТЕХСОСТОЯНИЕ и ТЕМПЕРАТУРА (1:1 как в Kurei Kei Edition) */
+        .cdi-status-bars {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+          padding: 4px 0;
+        }
+        @media (max-width: 680px) {
+          .cdi-status-bars { grid-template-columns: 1fr; }
+        }
+        .status-pill-group {
+          display: grid;
+          grid-template-columns: 135px 1fr;
+          align-items: center;
+          gap: 8px;
+        }
+        .cdi-big-pill {
+          height: 36px;
+          border-radius: 18px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          font-size: 16px;
+          font-weight: 800;
+          letter-spacing: 0.03em;
+          color: #fff;
+          text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+          border: 1.5px solid rgba(255, 255, 255, 0.45);
+        }
+        .pill-good {
+          background: linear-gradient(90deg, #00b4d8, #0077b6, #00f5d4);
+          box-shadow: 0 0 18px rgba(0, 245, 212, 0.45);
+        }
+        .pill-caution {
+          background: linear-gradient(90deg, #ff9e00, #ff5400);
+          box-shadow: 0 0 18px rgba(255, 158, 0, 0.5);
+        }
+        .pill-bad {
+          background: linear-gradient(90deg, #ff0054, #9e0059);
+          box-shadow: 0 0 22px rgba(255, 0, 84, 0.65);
+        }
+
+        /* 5. Стеклянная таблица S.M.A.R.T. (справа внизу, как на фото) */
+        .cdi-smart-box {
+          flex: 1;
+          border-radius: 8px;
+          background: rgba(8, 5, 18, 0.68);
+          border: 1px solid rgba(255, 255, 255, 0.22);
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+        }
+        .cdi-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 12.5px;
+        }
+        .cdi-table th {
+          background: rgba(255, 255, 255, 0.08);
+          color: #e2dcf0;
+          font-weight: 600;
+          padding: 7px 10px;
+          text-align: left;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+          white-space: nowrap;
+        }
+        .cdi-table td {
+          padding: 6px 10px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+          color: #f8f5f0;
+        }
+        .cdi-table tr {
+          cursor: pointer;
+          transition: background 0.12s;
+        }
+        .cdi-table tr:hover td {
+          background: rgba(255, 0, 127, 0.18);
+        }
+        .cdi-table tr.selected td {
+          background: linear-gradient(90deg, rgba(255, 0, 127, 0.32), rgba(0, 245, 212, 0.2));
+          border-top: 1px solid #ffbe0b;
+          border-bottom: 1px solid #ffbe0b;
+        }
+        .orb {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          display: inline-block;
+        }
+        .orb-good {
+          background: radial-gradient(circle at 35% 35%, #a8f9ff, #00bbf9);
+          box-shadow: 0 0 8px #00bbf9;
+        }
+        .orb-caution {
+          background: radial-gradient(circle at 35% 35%, #fff3b0, #ff9e00);
+          box-shadow: 0 0 8px #ff9e00;
+        }
+        .orb-bad {
+          background: radial-gradient(circle at 35% 35%, #ffccd5, #ff0054);
+          box-shadow: 0 0 10px #ff0054;
         }
       `,
         }}
       />
 
-      {/* ВЕРХНЯЯ ПАНЕЛЬ КАССЕТ ПАМЯТИ */}
-      <header className="martinaise-topbar">
-        <div className="brand-cluster">
-          <span className="insulindian-seal font-oswald">РГМ // СЕКТОР 41</span>
-          <h1 className="main-heading font-oswald">
-            CrystalDisk // Elysium
-          </h1>
+      {/* СКРЫТЫЙ INPUT ДЛЯ ЗАГРУЗКИ ВАШИХ АРТОВ */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={(e) => handleArtFiles(e.target.files)}
+        style={{ display: "none" }}
+      />
+
+      {/* ОВЕРЛЕЙ ПРИ ПЕРЕТАСКИВАНИИ ФАЙЛОВ АРТОВ В ОКНО */}
+      {isDraggingOver && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(255, 0, 127, 0.35)",
+            backdropFilter: "blur(8px)",
+            zIndex: 99,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "4px dashed #ffbe0b",
+          }}
+        >
+          <div className="font-oswald" style={{ fontSize: "28px", color: "#fff" }}>
+            ✨ Отпустите файл изображения, чтобы установить его как скин Disco Elysium!
+          </div>
+        </div>
+      )}
+
+      {/* ГЛАВНОЕ ОКНО CRYSTALDISKINFO: DISCO ELYSIUM EDITION */}
+      <div className="cdi-window">
+        {/* РАЗМЫТОЕ СВЕЧЕНИЕ АРТА ПОД ПОЛУПРОЗРАЧНЫМ СТЕКЛОМ СПРАВА */}
+        <div className="ambient-art-bleed">
+          <PsychedelicArtworkCanvas
+            themeId={visualTheme}
+            customUrl={activeCustomUrl}
+            health={effectiveHealth}
+            temp={effectiveTemp}
+          />
         </div>
 
-        <div className="cassette-strip">
-          {drives.map((drv, idx) => {
-            const color =
-              drv.healthStatus === "GOOD"
-                ? "#68c7b7"
-                : drv.healthStatus === "CAUTION"
-                ? "#f2a93b"
-                : "#ff4d5e";
-            return (
-              <button
-                key={drv.id}
-                onClick={() => handleSelectDrive(idx)}
-                className={`cassette-tab ${idx === activeDriveIdx ? "active" : ""}`}
-              >
-                <span
-                  style={{
-                    width: "12px",
-                    height: "12px",
-                    background: color,
-                    boxShadow: `0 0 10px ${color}`,
-                    transform: "rotate(45deg)",
-                    display: "inline-block",
-                  }}
-                />
-                <div style={{ textAlign: "left" }}>
-                  <div className="font-oswald" style={{ fontSize: "13px", color: "#fff5e4" }}>
-                    [{drv.letter}] {drv.healthPercent}% • {drv.temperature} °C
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#b5a48b" }}>
-                    {drv.name}
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button onClick={() => setShowImportModal(true)} className="painterly-btn">
-            + Загрузить дамп своего диска
-          </button>
-          <button
-            onClick={() => setRawFormat((p) => (p === "HEX16" ? "DEC10" : "HEX16"))}
-            className="painterly-btn font-mono"
-          >
-            {rawFormat === "HEX16" ? "RAW: 16 [HEX]" : "RAW: 10 [DEC]"}
-          </button>
-          <button onClick={toggleSound} className="painterly-btn">
-            {soundEnabled ? "🔊 Звук: ВКЛ" : "🔇 Звук: ВЫКЛ"}
-          </button>
-        </div>
-      </header>
-
-      {/* ТРЁХКОЛОНОЧНАЯ СЦЕНА */}
-      <div className="stage-grid">
-        {/* 1. ЛЕВЫЙ СТОЛБ: ШКАЛЫ ЗДОРОВЬЯ/МОРАЛИ + ХОЛСТ МАСЛОМ + ТАРО-ИНДИКАТОРЫ */}
-        <aside className="left-hud">
-          {/* Каноничные шкалы Здоровья и Морали */}
-          <div className="vital-bars">
-            <div>
-              <div
-                className="font-oswald"
-                style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#ff756b", marginBottom: "3px" }}
-              >
-                <span>Здоровье кремния (TBW)</span>
-                <span className="font-mono">{activeDrive.healthPercent}%</span>
-              </div>
-              <div className="pip-row">
-                {Array.from({ length: 10 }, (_, i) => (
-                  <div key={i} className={`pip-cell ${i < healthPips ? "pip-health-on" : ""}`} />
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <div
-                className="font-oswald"
-                style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#6ec1e4", marginBottom: "3px" }}
-              >
-                <span>Мораль контроллера</span>
-                <span className="font-mono">{activeDrive.moralePercent}%</span>
-              </div>
-              <div className="pip-row">
-                {Array.from({ length: 10 }, (_, i) => (
-                  <div key={i} className={`pip-cell ${i < moralePips ? "pip-morale-on" : ""}`} />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Живописный холст маслом (<canvas>) */}
-          <div className="oil-frame">
-            <ImpastoOilPortrait artId={artPiece} health={effectiveHealth} temp={effectiveTemp} />
-            <div className="oil-caption font-oswald">
-              {artPiece === "tequila"
-                ? "Гарри «Текила Сансет»"
-                : artPiece === "interfacing"
-                ? "Навык: Интерфейс"
-                : artPiece === "inland"
-                ? "Внутренняя Империя"
-                : "Лейтенант Ким Кицураги"}
-            </div>
-          </div>
-
-          {/* Переключатель картин маслом */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-            {[
-              { id: "tequila", label: "Текила Сансет" },
-              { id: "interfacing", label: "Интерфейс" },
-              { id: "inland", label: "Империя" },
-              { id: "kim", label: "Ким Кицураги" },
-            ].map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setArtPiece(p.id as ArtPieceId)}
-                className="painterly-btn"
-                style={{
-                  padding: "5px 6px",
-                  fontSize: "11px",
-                  background: artPiece === p.id ? "#d95326" : "#241d17",
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Крупная печать Техсостояния */}
-          <div
-            className={`tarot-card ${
-              effectiveHealth === "GOOD"
-                ? "tarot-good"
-                : effectiveHealth === "CAUTION"
-                ? "tarot-caution"
-                : "tarot-bad"
-            }`}
-          >
-            <div className="font-oswald" style={{ fontSize: "11px", color: "#e8dec8", opacity: 0.8 }}>
-              Вердикт техсостояния
-            </div>
-            <div className="font-oswald" style={{ fontSize: "24px", fontWeight: 700, color: "#fff" }}>
-              {effectiveHealth === "GOOD"
-                ? "БЕЗУПРЕЧНО"
-                : effectiveHealth === "CAUTION"
-                ? "ТРЕВОГА (ИЗНОС)"
-                : "РАСПАД В СЕРОТУ"}
-            </div>
-            <div className="font-mono" style={{ fontSize: "18px", color: "#f2b441", fontWeight: 700 }}>
-              Ресурс: {activeDrive.healthPercent} %
-            </div>
-          </div>
-
-          {/* Крупная печать Температуры */}
-          <div
-            className={`tarot-card ${
-              effectiveTemp < 50 ? "tarot-good" : effectiveTemp < 60 ? "tarot-caution" : "tarot-bad"
-            }`}
-          >
-            <div className="font-oswald" style={{ fontSize: "11px", color: "#e8dec8", opacity: 0.8 }}>
-              Термодинамика корпуса
-            </div>
-            <div className="font-mono" style={{ fontSize: "26px", fontWeight: 700, color: "#fff" }}>
-              {effectiveTemp} °C
-            </div>
-            <input
-              type="range"
-              min={-10}
-              max={28}
-              value={tempOffset}
-              onChange={(e) => setTempOffset(Number(e.target.value))}
-              style={{ width: "100%", accentColor: "#d95326", marginTop: "6px", cursor: "pointer" }}
-            />
-            <div style={{ fontSize: "12px", color: "#d4b88c", fontStyle: "italic" }}>
-              Ползунок теплового стресса ({tempOffset >= 0 ? `+${tempOffset}` : tempOffset} °C)
-            </div>
-          </div>
-        </aside>
-
-        {/* 2. ЦЕНТРАЛЬНАЯ ЧАСТЬ: ПАСПОРТ НАКОПИТЕЛЯ + ТАБЛИЦА S.M.A.R.T. */}
-        <main className="center-dossier">
-          <div className="dossier-card">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", borderBottom: "2px solid #6e5536", paddingBottom: "8px" }}>
-              <h2 className="font-oswald" style={{ margin: 0, fontSize: "22px", color: "#f2b441" }}>
-                {activeDrive.model} ({activeDrive.capacityGB} ГБ)
-              </h2>
-              <span className="font-mono" style={{ fontSize: "12px", color: "#68c7b7" }}>
-                {activeDrive.isRealHardware ? "● РЕАЛЬНОЕ ОБОРУДОВАНИЕ ПК" : "● КАССЕТА ПРОТОКОЛА РГМ"}
-              </span>
-            </div>
-
-            <p style={{ margin: "10px 0 6px 0", fontSize: "17px", fontStyle: "italic", color: "#e8dec8" }}>
-              «{activeDrive.introQuote}»
-            </p>
-
-            <div className="passport-grid">
-              <div className="passport-line">
-                <span style={{ color: "#b5a48b" }}>Прошивка (Firmware):</span>
-                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.firmware}</span>
-              </div>
-              <div className="passport-line">
-                <span style={{ color: "#b5a48b" }}>Хост-чтение (Всего):</span>
-                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.totalReadsGB.toLocaleString("ru-RU")} ГБ</span>
-              </div>
-              <div className="passport-line">
-                <span style={{ color: "#b5a48b" }}>Серийный номер:</span>
-                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.serial}</span>
-              </div>
-              <div className="passport-line">
-                <span style={{ color: "#b5a48b" }}>Хост-запись (Всего):</span>
-                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.totalWritesGB.toLocaleString("ru-RU")} ГБ</span>
-              </div>
-              <div className="passport-line">
-                <span style={{ color: "#b5a48b" }}>Шина / Интерфейс:</span>
-                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.interfaceType}</span>
-              </div>
-              <div className="passport-line">
-                <span style={{ color: "#b5a48b" }}>Циклов включения:</span>
-                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.powerOnCount.toLocaleString("ru-RU")} раз</span>
-              </div>
-              <div className="passport-line">
-                <span style={{ color: "#b5a48b" }}>Режим передачи:</span>
-                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.transferMode}</span>
-              </div>
-              <div className="passport-line">
-                <span style={{ color: "#b5a48b" }}>Часов под напряжением:</span>
-                <span className="font-mono" style={{ fontWeight: 700 }}>
-                  {activeDrive.powerOnHours.toLocaleString("ru-RU")} ч ({Math.round(activeDrive.powerOnHours / 24)} сут.)
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* ТАБЛИЦА АТРИБУТОВ S.M.A.R.T. */}
-          <div className="smart-table-wrap">
-            <div style={{ padding: "10px 16px", background: "#241c16", borderBottom: "1.5px solid #6e5536", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span className="font-oswald" style={{ fontSize: "14px", color: "#f5ebd6" }}>
-                Ведомость регистров самодиагностики S.M.A.R.T. (кликните по строке для допроса)
-              </span>
-              <span className="font-mono" style={{ fontSize: "12px", color: "#f2b441" }}>
-                Регистр: {selectedAttrId}h
-              </span>
-            </div>
-
-            <div style={{ overflowX: "auto" }}>
-              <table className="disco-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: "42px" }}>Печать</th>
-                    <th style={{ width: "50px" }}>ID</th>
-                    <th>Атрибут / Физический смысл регистра</th>
-                    <th style={{ width: "130px" }}>Запас прочности</th>
-                    <th style={{ textAlign: "right" }}>Тек.</th>
-                    <th style={{ textAlign: "right" }}>Худш.</th>
-                    <th style={{ textAlign: "right" }}>Порог</th>
-                    <th style={{ textAlign: "right" }}>Счётчик RAW</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activeDrive.attributes.map((attr) => {
-                    const color =
-                      attr.status === "GOOD"
-                        ? "#68c7b7"
-                        : attr.status === "CAUTION"
-                        ? "#f2a93b"
-                        : "#ff4d5e";
-                    const pct = Math.min(100, Math.max(8, attr.current));
-                    return (
-                      <tr
-                        key={attr.id}
-                        onClick={() => handleInspectAttribute(attr)}
-                        className={selectedAttrId === attr.id ? "active-attr" : ""}
-                      >
-                        <td style={{ textAlign: "center" }}>
-                          <span
-                            style={{
-                              display: "inline-block",
-                              width: "11px",
-                              height: "11px",
-                              background: color,
-                              transform: "rotate(45deg)",
-                              boxShadow: `0 0 8px ${color}`,
-                            }}
-                          />
-                        </td>
-                        <td className="font-mono" style={{ fontWeight: 700, color: "#f2b441" }}>
-                          {attr.id}
-                        </td>
-                        <td>
-                          <div className="font-oswald" style={{ fontSize: "14px", color: "#fff5e4" }}>
-                            {attr.name}
-                          </div>
-                          <div style={{ fontSize: "14px", color: "#b5a48b", fontStyle: "italic" }}>
-                            {attr.ruName}
-                          </div>
-                        </td>
-                        <td>
-                          <div style={{ height: "8px", background: "#120e0b", border: "1px solid #4a3a28" }}>
-                            <div
-                              style={{
-                                width: `${pct}%`,
-                                height: "100%",
-                                background: color,
-                              }}
-                            />
-                          </div>
-                        </td>
-                        <td className="font-mono" style={{ textAlign: "right", fontSize: "13px" }}>
-                          {attr.current}
-                        </td>
-                        <td className="font-mono" style={{ textAlign: "right", fontSize: "13px", color: "#a89984" }}>
-                          {attr.worst}
-                        </td>
-                        <td className="font-mono" style={{ textAlign: "right", fontSize: "13px", color: "#8c7b65" }}>
-                          {attr.threshold}
-                        </td>
-                        <td
-                          className="font-mono"
-                          style={{
-                            textAlign: "right",
-                            fontSize: "13px",
-                            fontWeight: 700,
-                            color,
-                          }}
-                        >
-                          {formatRaw(attr.rawDec)}
-                          {attr.unit && rawFormat === "DEC10" ? ` ${attr.unit}` : ""}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </main>
-
-        {/* 3. ПРАВЫЙ СТОЛБ: КАНОНИЧНАЯ ЛЕНТА ГОЛОСОВ DISCO ELYSIUM */}
-        <aside className="right-tape">
-          <div className="tape-header">
-            <div>
-              <div className="font-oswald" style={{ fontSize: "14px", color: "#f2b441" }}>
-                Лента внутреннего диалога
-              </div>
-              <div style={{ fontSize: "13px", color: "#a89984", fontStyle: "italic" }}>
-                Голоса навыков препарируют телеметрию диска
-              </div>
-            </div>
-            <button
-              onClick={() => setDialogueLog((p) => p.slice(-1))}
-              className="painterly-btn"
-              style={{ padding: "4px 10px", fontSize: "11px" }}
+        {/* ВЕРХНЯЯ СТРОКА МЕНЮ (КАК В CRYSTALDISKINFO) */}
+        <header className="cdi-menubar">
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span
+              className="font-oswald"
+              style={{
+                padding: "2px 8px",
+                borderRadius: "4px",
+                background: "linear-gradient(90deg, #ff007f, #ff6b1a)",
+                color: "#fff",
+                fontSize: "11.5px",
+              }}
             >
-              Очистить
-            </button>
+              DISCO ELYSIUM EDITION x64
+            </span>
+            <span style={{ fontWeight: 700, fontSize: "12.5px", color: "#fff" }}>
+              CrystalDiskInfo 9.8.0 // Revachol Psychosis
+            </span>
           </div>
 
-          <div className="tape-scroll">
-            {dialogueLog.map((entry) => (
-              <div
-                key={entry.id}
-                className="dialogue-block"
-                style={{ borderLeftColor: getSkillColor(entry.category) }}
+          <div className="menu-links">
+            <button onClick={() => fileInputRef.current?.click()} className="menu-btn menu-btn-accent">
+              🖼️ Поставить свой арт (или перетащите фото сюда)
+            </button>
+            <button onClick={() => setShowImportModal(true)} className="menu-btn">
+              📂 Вставить S.M.A.R.T. своего ПК
+            </button>
+            <button onClick={copySmartReport} className="menu-btn">
+              📋 Копировать отчёт
+            </button>
+            <button
+              onClick={() => setRawFormat((p) => (p === "HEX16" ? "DEC10" : "HEX16"))}
+              className="menu-btn font-mono"
+            >
+              RAW: {rawFormat === "HEX16" ? "16 [HEX]" : "10 [DEC]"}
+            </button>
+            <button
+              onClick={() => {
+                soundFX.enabled = !soundOn;
+                setSoundOn(!soundOn);
+              }}
+              className="menu-btn"
+            >
+              {soundOn ? "🔊 Звук" : "🔇 Тихо"}
+            </button>
+          </div>
+        </header>
+
+        {/* ОСНОВНОЙ КОРПУС: СЛЕВА — ПОЛНОРОСТОВОЙ АРТ И ГОЛОСА В ГОЛОВЕ, СПРАВА — СТЕКЛЯННЫЙ СТЕНД CDI */}
+        <div className="cdi-body">
+          {/* ЛЕВАЯ КОЛОНКА (410px): ПОЛНОРОСТОВОЙ АРТ + ПСИХОДЕЛИЧЕСКИЙ ПОТОК СОЗНАНИЯ */}
+          <aside className="left-art-showcase">
+            <div className="art-canvas-holder">
+              <PsychedelicArtworkCanvas
+                themeId={visualTheme}
+                customUrl={activeCustomUrl}
+                health={effectiveHealth}
+                temp={effectiveTemp}
+              />
+            </div>
+
+            {/* Переключатель визуальных сцен поверх верхней кромки арта */}
+            <div className="art-overlay-top">
+              <button
+                onClick={() => setVisualTheme("mind_explosion")}
+                className={`skin-pill ${visualTheme === "mind_explosion" ? "active" : ""}`}
               >
-                <div>
-                  <span
-                    className="dialogue-actor"
-                    style={{ color: getSkillColor(entry.category) }}
-                  >
-                    {entry.skill}
-                  </span>
-                  {entry.difficulty && (
-                    <span className="dialogue-check-tag">[{entry.difficulty}]</span>
-                  )}
-                </div>
-                <div className="dialogue-prose">— {entry.text}</div>
-              </div>
-            ))}
-            <div ref={logBottomRef} />
-          </div>
-
-          {/* Нижняя панель выбора реплики и Белой проверки 2d6 */}
-          <div className="red-choice-box">
-            <button onClick={handleRollWhiteCheck} className="red-dialogue-option">
-              1. 🎲 [ИНТЕРФЕЙС — Средне 8] Приложить ладонь к корпусу [{activeDrive.letter}] и прослушать биение секторов.
-            </button>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: "#b5a48b" }}>
-              <span>Модификатор зависит от здоровья носителя</span>
-              {lastDice && (
-                <span className="font-mono" style={{ color: "#f2b441", fontWeight: 700 }}>
-                  Кости: [{lastDice[0]}] [{lastDice[1]}]
-                </span>
+                🧠 Взрыв Сознания (B&apos; B&apos;&apos;)
+              </button>
+              <button
+                onClick={() => setVisualTheme("church_lasers")}
+                className={`skin-pill ${visualTheme === "church_lasers" ? "active" : ""}`}
+              >
+                ⚡ Лазеры и Долорес
+              </button>
+              {customArt1 && (
+                <button
+                  onClick={() => setVisualTheme("custom_1")}
+                  className={`skin-pill ${visualTheme === "custom_1" ? "active" : ""}`}
+                >
+                  🎨 Ваш Арт #1
+                </button>
+              )}
+              {customArt2 && (
+                <button
+                  onClick={() => setVisualTheme("custom_2")}
+                  className={`skin-pill ${visualTheme === "custom_2" ? "active" : ""}`}
+                >
+                  🎨 Ваш Арт #2
+                </button>
               )}
             </div>
-          </div>
-        </aside>
+
+            {/* Поток голосов в голове Гарри поверх нижней части арта */}
+            <div className="art-overlay-bottom">
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  borderBottom: "1px solid rgba(255, 0, 127, 0.4)",
+                  paddingBottom: "4px",
+                }}
+              >
+                <span className="font-oswald" style={{ fontSize: "12px", color: "#ffbe0b" }}>
+                  Голоса в голове детектива // Регистр [{selectedAttrId}h]
+                </span>
+                {lastDice && (
+                  <span className="font-mono" style={{ fontSize: "11.5px", color: "#00f5d4" }}>
+                    🎲 Кости: [{lastDice[0]}] + [{lastDice[1]}]
+                  </span>
+                )}
+              </div>
+
+              <div style={{ maxHeight: "215px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px", paddingRight: "4px" }}>
+                {thoughts.map((t) => (
+                  <div
+                    key={t.id}
+                    style={{
+                      borderLeft: `3px solid ${getSkillColor(t.category)}`,
+                      paddingLeft: "10px",
+                    }}
+                  >
+                    <div>
+                      <span
+                        className="font-oswald"
+                        style={{ fontSize: "12.5px", color: getSkillColor(t.category) }}
+                      >
+                        {t.skill}
+                      </span>
+                      {t.difficulty && (
+                        <span
+                          className="font-serif-disco"
+                          style={{ fontSize: "13px", color: "#cbd5e1", marginLeft: "6px", fontStyle: "italic" }}
+                        >
+                          [{t.difficulty}]
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className="font-serif-disco"
+                      style={{ fontSize: "16px", lineHeight: 1.38, color: "#fff", marginTop: "2px" }}
+                    >
+                      — {t.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </aside>
+
+          {/* ПРАВАЯ ЧАСТЬ: ПОЛУПРОЗРАЧНЫЙ СТЕКЛЯННЫЙ CRYSTALDISKINFO */}
+          <main className="right-cdi-glass">
+            {/* 1. Полоса вкладок дисков (как в CrystalDiskInfo) */}
+            <div className="cdi-drive-tabs">
+              {drives.map((drv, idx) => {
+                const orbClass =
+                  drv.healthStatus === "GOOD"
+                    ? "orb-good"
+                    : drv.healthStatus === "CAUTION"
+                    ? "orb-caution"
+                    : "orb-bad";
+                return (
+                  <button
+                    key={drv.id}
+                    onClick={() => handleSelectDrive(idx)}
+                    className={`cdi-tab-item ${idx === activeDriveIdx ? "active" : ""}`}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", fontWeight: 700, fontSize: "12px" }}>
+                      <span className={`orb ${orbClass}`} />
+                      <span>
+                        {drv.healthStatus === "GOOD"
+                          ? "Хорошо"
+                          : drv.healthStatus === "CAUTION"
+                          ? "Тревога"
+                          : "Серота"}{" "}
+                        ({drv.healthPercent}%)
+                      </span>
+                    </div>
+                    <div className="font-mono" style={{ fontSize: "12px", color: "#ffbe0b", marginTop: "2px" }}>
+                      {drv.temperature} °C • Том [{drv.letter}]
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 2. Крупное название модели и объёма */}
+            <div className="cdi-model-banner">
+              <h1 className="cdi-model-title">
+                {activeDrive.model} : {activeDrive.capacityGB.toFixed(1)} GB
+              </h1>
+            </div>
+
+            {/* 3. Двухколоночный паспорт диска + центральный тотем броска кубиков 2d6 */}
+            <div className="cdi-passport-layout">
+              {/* Левый столбец паспорта */}
+              <div className="cdi-field-list">
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Прошивка</span>
+                  <div className="cdi-field-box font-mono">{activeDrive.firmware}</div>
+                </div>
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Серийный номер</span>
+                  <div className="cdi-field-box font-mono">{activeDrive.serial}</div>
+                </div>
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Интерфейс</span>
+                  <div className="cdi-field-box font-mono">{activeDrive.interfaceType}</div>
+                </div>
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Режим передачи</span>
+                  <div className="cdi-field-box font-mono">{activeDrive.transferMode}</div>
+                </div>
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Буква тома</span>
+                  <div className="cdi-field-box font-mono">
+                    {activeDrive.letter} ({activeDrive.name})
+                  </div>
+                </div>
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Стандарт</span>
+                  <div className="cdi-field-box font-mono">{activeDrive.standard}</div>
+                </div>
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Возможности</span>
+                  <div className="cdi-field-box font-mono">{activeDrive.features}</div>
+                </div>
+              </div>
+
+              {/* Центральный тотем (на месте чиби-стикера в Kurei Kei Edition): Бросок костей 2d6 */}
+              <button
+                onClick={handleRollDice}
+                className="center-totem-btn"
+                title="Бросить кубики 2d6 (Белая проверка Интерфейса)"
+              >
+                <span style={{ fontSize: "28px" }}>🎲</span>
+                <span className="font-oswald" style={{ fontSize: "11px", textAlign: "center", lineHeight: 1.15 }}>
+                  Бросок 2d6
+                  <br />
+                  <span style={{ color: "#ffbe0b" }}>Допрос чипа</span>
+                </span>
+              </button>
+
+              {/* Правый столбец паспорта */}
+              <div className="cdi-field-list">
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Всего хост-чтений</span>
+                  <div className="cdi-field-box font-mono">
+                    {activeDrive.totalReadsGB.toLocaleString("ru-RU")} GB
+                  </div>
+                </div>
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Всего хост-записей</span>
+                  <div className="cdi-field-box font-mono">
+                    {activeDrive.totalWritesGB.toLocaleString("ru-RU")} GB
+                  </div>
+                </div>
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Скорость вращения</span>
+                  <div className="cdi-field-box font-mono">{activeDrive.rotationRate}</div>
+                </div>
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Число включений</span>
+                  <div className="cdi-field-box font-mono">
+                    {activeDrive.powerOnCount.toLocaleString("ru-RU")} раз
+                  </div>
+                </div>
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Общее время работы</span>
+                  <div className="cdi-field-box font-mono">
+                    {activeDrive.powerOnHours.toLocaleString("ru-RU")} ч
+                  </div>
+                </div>
+                <div className="cdi-field-row">
+                  <span className="cdi-field-label">Тепловой стресс</span>
+                  <div className="cdi-field-box" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <input
+                      type="range"
+                      min={-10}
+                      max={25}
+                      value={tempOffset}
+                      onChange={(e) => setTempOffset(Number(e.target.value))}
+                      style={{ width: "100%", accentColor: "#ff007f", cursor: "pointer" }}
+                    />
+                    <span className="font-mono" style={{ fontSize: "11px", color: "#ffbe0b" }}>
+                      {tempOffset >= 0 ? `+${tempOffset}°` : `${tempOffset}°`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Две широкие капсулы ТЕХСОСТОЯНИЕ и ТЕМПЕРАТУРА (как на фото Kurei Kei Edition) */}
+            <div className="cdi-status-bars">
+              <div className="status-pill-group">
+                <span className="cdi-field-label" style={{ fontWeight: 700 }}>
+                  Техсостояние
+                </span>
+                <div
+                  className={`cdi-big-pill ${
+                    effectiveHealth === "GOOD"
+                      ? "pill-good"
+                      : effectiveHealth === "CAUTION"
+                      ? "pill-caution"
+                      : "pill-bad"
+                  }`}
+                >
+                  <span>
+                    {effectiveHealth === "GOOD"
+                      ? "Хорошо"
+                      : effectiveHealth === "CAUTION"
+                      ? "Тревога"
+                      : "Плохо (Серота)"}{" "}
+                    ({activeDrive.healthPercent} %)
+                  </span>
+                </div>
+              </div>
+
+              <div className="status-pill-group">
+                <span className="cdi-field-label" style={{ fontWeight: 700 }}>
+                  Температура
+                </span>
+                <div
+                  className={`cdi-big-pill font-mono ${
+                    effectiveTemp < 50
+                      ? "pill-good"
+                      : effectiveTemp < 60
+                      ? "pill-caution"
+                      : "pill-bad"
+                  }`}
+                >
+                  <span>{effectiveTemp} °C</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 5. Таблица S.M.A.R.T. (внизу справа, с прозрачным фоном) */}
+            <div className="cdi-smart-box">
+              <div style={{ overflowX: "auto", flex: 1 }}>
+                <table className="cdi-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "36px" }}></th>
+                      <th style={{ width: "48px" }}>ID</th>
+                      <th>Атрибут (кликните для психоанализа сектора)</th>
+                      <th style={{ textAlign: "right" }}>Текущее</th>
+                      <th style={{ textAlign: "right" }}>Наихудшее</th>
+                      <th style={{ textAlign: "right" }}>Порог</th>
+                      <th style={{ textAlign: "right" }}>Raw-значения</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeDrive.attributes.map((attr) => {
+                      const orbClass =
+                        attr.status === "GOOD"
+                          ? "orb-good"
+                          : attr.status === "CAUTION"
+                          ? "orb-caution"
+                          : "orb-bad";
+                      return (
+                        <tr
+                          key={attr.id}
+                          onClick={() => handleSelectAttribute(attr)}
+                          className={selectedAttrId === attr.id ? "selected" : ""}
+                        >
+                          <td style={{ textAlign: "center" }}>
+                            <span className={`orb ${orbClass}`} />
+                          </td>
+                          <td className="font-mono" style={{ fontWeight: 700, color: "#00f5d4" }}>
+                            {attr.id}
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{attr.ruName}</div>
+                            <div style={{ fontSize: "11px", color: "#a5b4fc" }}>{attr.name}</div>
+                          </td>
+                          <td className="font-mono" style={{ textAlign: "right" }}>
+                            {attr.current}
+                          </td>
+                          <td className="font-mono" style={{ textAlign: "right" }}>
+                            {attr.worst}
+                          </td>
+                          <td className="font-mono" style={{ textAlign: "right", color: "#94a3b8" }}>
+                            {attr.threshold}
+                          </td>
+                          <td
+                            className="font-mono"
+                            style={{
+                              textAlign: "right",
+                              fontWeight: 700,
+                              color:
+                                attr.status === "BAD"
+                                  ? "#ff4d6d"
+                                  : attr.status === "CAUTION"
+                                  ? "#ffbe0b"
+                                  : "#a8f9ff",
+                            }}
+                          >
+                            {formatRaw(attr.rawDec)}
+                            {attr.unit && rawFormat === "DEC10" ? ` ${attr.unit}` : ""}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </main>
+        </div>
       </div>
 
-      {/* МОДАЛЬНОЕ ОКНО ИМПОРТА НАСТОЯЩЕГО ОТЧЁТА С ВАШЕГО ПК */}
+      {/* МОДАЛЬНОЕ ОКНО ВСТАВКИ ОТЧЁТА СВОЕГО ПК */}
       {showImportModal && (
         <div
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.82)",
-            zIndex: 60,
+            background: "rgba(6, 3, 12, 0.85)",
+            backdropFilter: "blur(10px)",
+            zIndex: 80,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -1970,43 +2132,45 @@ export default function DiscoDiskElysium() {
           <div
             style={{
               width: "100%",
-              maxWidth: "680px",
-              background: "#1a1511",
-              border: "2px solid #d99326",
-              boxShadow: "10px 10px 0px #000",
-              padding: "24px",
+              maxWidth: "640px",
+              background: "#130b24",
+              border: "2px solid #ff007f",
+              borderRadius: "12px",
+              padding: "22px",
+              boxShadow: "0 0 50px rgba(255, 0, 127, 0.4)",
             }}
           >
-            <h3 className="font-oswald" style={{ margin: "0 0 8px 0", fontSize: "18px", color: "#f2b441" }}>
-              Загрузка реальной перфоленты S.M.A.R.T. с вашего ПК
+            <h3 className="font-oswald" style={{ margin: "0 0 8px 0", fontSize: "18px", color: "#ffbe0b" }}>
+              Импорт S.M.A.R.T.-телеметрии вашего накопителя
             </h3>
-            <p style={{ margin: "0 0 12px 0", fontSize: "15px", color: "#e8dec8" }}>
-              Чтобы загрузить данные своего диска прямо в браузере, откройте обычный CrystalDiskInfo, нажмите `Ctrl + C` (или выполните в терминале `smartctl -a /dev/nvme0`) и вставьте текст ниже:
+            <p style={{ margin: "0 0 12px 0", color: "#e2dcf0", fontSize: "13px" }}>
+              В обычном CrystalDiskInfo нажмите `Ctrl + C` (или выполните `smartctl -a`) и вставьте текст ниже:
             </p>
             <textarea
               rows={9}
               value={importText}
               onChange={(e) => setImportText(e.target.value)}
               placeholder={
-                "Model : Samsung SSD 980 1TB\nFirmware : 3B4QFXO7\nTemperature : 39 C\nHealth Status : Good (99 %)\n01 100 100 0 000000000000 Raw Read Error Rate\n05 100 100 10 000000000002 Reallocated Sectors Count"
+                "Model : TMI 512GB SATA\nFirmware : SFMB004K\nTemperature : 40 C\nHealth Status : Good (100 %)\n09 100 100 0 000000000138 Power-On Hours"
               }
               className="font-mono"
               style={{
                 width: "100%",
-                background: "#0d0b09",
-                border: "1px solid #6e5536",
-                color: "#f5ebd6",
+                background: "#080510",
+                border: "1px solid rgba(255,255,255,0.25)",
+                borderRadius: "8px",
+                color: "#fff",
                 padding: "10px",
-                fontSize: "12.5px",
+                fontSize: "12px",
                 marginBottom: "14px",
               }}
             />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-              <button onClick={() => setShowImportModal(false)} className="painterly-btn">
+              <button onClick={() => setShowImportModal(false)} className="menu-btn">
                 Отмена
               </button>
-              <button onClick={handleImportSubmit} className="painterly-btn">
-                Считать перфоленту
+              <button onClick={handleImportSubmit} className="menu-btn menu-btn-accent">
+                Загрузить в терминал
               </button>
             </div>
           </div>
