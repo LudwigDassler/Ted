@@ -3,14 +3,14 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 
 // ============================================================================
-// 1. ТИПЫ ДАННЫХ S.M.A.R.T. И ДИАЛОГОВОЙ СИСТЕМЫ DISCO ELYSIUM
+// 1. ТИПЫ ДАННЫХ S.M.A.R.T. И СИСТЕМЫ НАВЫКОВ DISCO ELYSIUM
 // ============================================================================
 
 type HealthState = "GOOD" | "CAUTION" | "BAD";
-type PersonaId = "harry" | "kim" | "radiocomputer";
+type ArtPieceId = "tequila" | "interfacing" | "inland" | "kim";
 
 interface SmartAttribute {
-  id: string; // HEX ID, напр. "01", "05", "09", "C2"
+  id: string;
   name: string;
   ruName: string;
   current: number;
@@ -41,6 +41,7 @@ interface DriveProfile {
   features: string;
   healthStatus: HealthState;
   healthPercent: number;
+  moralePercent: number;
   temperature: number;
   totalReadsGB: number;
   totalWritesGB: number;
@@ -48,30 +49,426 @@ interface DriveProfile {
   powerOnHours: number;
   rotationRate: string;
   introQuote: string;
+  isRealHardware?: boolean;
   attributes: SmartAttribute[];
 }
 
 interface DialogueEntry {
   id: string;
-  timestamp: string;
   skill: string;
-  category: "INT" | "PSY" | "FYS" | "MOT" | "SYS";
-  checkResult?: "SUCCESS" | "FAILURE" | "INFO";
+  category: "INT" | "PSY" | "FYS" | "MOT" | "SYS" | "YOU";
   difficulty?: string;
+  checkResult?: "SUCCESS" | "FAILURE" | "INFO";
   text: string;
-  attrId?: string;
 }
 
 // ============================================================================
-// 2. ПРЕДУСТАНОВЛЕННЫЕ НАКОПИТЕЛИ С ПОЛНОЙ БАЗОЙ ЗНАНИЙ S.M.A.R.T.
+// 2. ЗВУКОВОЙ СИНТЕЗАТОР WEB AUDIO (ЩЕЛЧКИ HDD, КУБИКИ 2D6 И АККОРДЫ ПРОВЕРОК)
+// ============================================================================
+
+class DiscoAudioEngine {
+  private ctx: AudioContext | null = null;
+  public enabled: boolean = true;
+
+  private init() {
+    if (typeof window === "undefined") return;
+    if (!this.ctx) {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      this.ctx = new AudioCtx();
+    }
+    if (this.ctx.state === "suspended") {
+      this.ctx.resume();
+    }
+  }
+
+  /** Короткий механический щелчок позиционирования магнитной головки HDD */
+  playActuatorClick(status: HealthState = "GOOD") {
+    if (!this.enabled) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = status === "BAD" ? "sawtooth" : "triangle";
+      osc.frequency.setValueAtTime(status === "BAD" ? 190 : 620, now);
+      osc.frequency.exponentialRampToValueAtTime(55, now + 0.045);
+
+      gain.gain.setValueAtTime(0.14, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.05);
+    } catch {}
+  }
+
+  /** Звук переката двух костей и атмосферный аккорд в стиле British Sea Power */
+  playDiceRoll(success: boolean) {
+    if (!this.enabled) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // Серия щелчков кубиков о сукно
+      [0, 0.06, 0.13, 0.22].forEach((offset) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        osc.type = "square";
+        osc.frequency.setValueAtTime(800 + Math.random() * 500, now + offset);
+        osc.frequency.exponentialRampToValueAtTime(120, now + offset + 0.025);
+        g.gain.setValueAtTime(0.08, now + offset);
+        g.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.025);
+        osc.connect(g);
+        g.connect(this.ctx.destination);
+        osc.start(now + offset);
+        osc.stop(now + offset + 0.03);
+      });
+
+      // Финальный аккорд (высокий духовой при успехе, вязкий низкий при провале)
+      const chordFreqs = success ? [261.63, 329.63, 392.0, 523.25] : [110.0, 130.81, 155.56];
+      chordFreqs.forEach((f) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        osc.type = success ? "sine" : "sawtooth";
+        osc.frequency.setValueAtTime(f, now + 0.28);
+        g.gain.setValueAtTime(0.001, now + 0.28);
+        g.gain.linearRampToValueAtTime(success ? 0.06 : 0.045, now + 0.35);
+        g.gain.exponentialRampToValueAtTime(0.0008, now + 1.4);
+        osc.connect(g);
+        g.connect(this.ctx.destination);
+        osc.start(now + 0.28);
+        osc.stop(now + 1.45);
+      });
+    } catch {}
+  }
+}
+
+const audioEngine = new DiscoAudioEngine();
+
+// ============================================================================
+// 3. ПРОЦЕДУРНЫЙ ХУДОЖНИК МАСЛЯНОЙ ЖИВОПИСИ НА HTML5 CANVAS (СТИЛЬ РОСТОВА)
+// ============================================================================
+
+function ImpastoOilPortrait({
+  artId,
+  health,
+  temp,
+}: {
+  artId: ArtPieceId;
+  health: HealthState;
+  temp: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const W = canvas.width;
+    const H = canvas.height;
+
+    // Детерминированный генератор для стабильных мазков мастихина
+    let seed =
+      (artId === "tequila" ? 101 : artId === "interfacing" ? 202 : artId === "inland" ? 303 : 404) +
+      (health === "GOOD" ? 1 : health === "CAUTION" ? 2 : 3);
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+
+    // Вспомогательная функция: густой текстурный мазок кисти / мастихина
+    const paintStroke = (
+      x1: number,
+      y1: number,
+      x2: number,
+      y2: number,
+      width: number,
+      color: string,
+      alpha = 0.85
+    ) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineCap = "butt";
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.quadraticCurveTo(
+        (x1 + x2) / 2 + (rand() - 0.5) * 14,
+        (y1 + y2) / 2 + (rand() - 0.5) * 14,
+        x2,
+        y2
+      );
+      ctx.stroke();
+
+      // Светлый гребень масляной краски по краю мазка (импасто)
+      ctx.globalAlpha = alpha * 0.35;
+      ctx.lineWidth = Math.max(1, width * 0.22);
+      ctx.strokeStyle = "#fff5e4";
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    // 1. Грунтовка холста (глубокий умбристый подмалёвок)
+    ctx.fillStyle = "#0e0c0a";
+    ctx.fillRect(0, 0, W, H);
+
+    // Палитра фона в зависимости от состояния диска и температуры
+    const bgPalette =
+      health === "GOOD"
+        ? ["#132a28", "#1f4e48", "#2d6e66", "#c47d2b", "#241c18"]
+        : health === "CAUTION"
+        ? ["#2b1911", "#613214", "#b85d19", "#d99326", "#1c1613"]
+        : ["#260b0e", "#591119", "#9e1f28", "#e03c31", "#140b0d"];
+
+    // 2. Экспрессионистские фоновые плоскости мастихином
+    for (let i = 0; i < 65; i++) {
+      const x = rand() * W;
+      const y = rand() * H;
+      const angle = -0.65 + (rand() - 0.5) * 0.8;
+      const len = 45 + rand() * 90;
+      const col = bgPalette[Math.floor(rand() * bgPalette.length)];
+      paintStroke(
+        x,
+        y,
+        x + Math.cos(angle) * len,
+        y + Math.sin(angle) * len,
+        14 + rand() * 24,
+        col,
+        0.65
+      );
+    }
+
+    // 3. Светящийся нимб (Корона мыслей Disco Elysium позади головы)
+    const haloColor =
+      temp >= 55 || health === "BAD"
+        ? "#ff3b28"
+        : health === "CAUTION"
+        ? "#f2a93b"
+        : "#68c7b7";
+
+    ctx.save();
+    const grad = ctx.createRadialGradient(W * 0.5, H * 0.42, 12, W * 0.5, H * 0.42, 118);
+    grad.addColorStop(0, haloColor + "66");
+    grad.addColorStop(0.6, haloColor + "22");
+    grad.addColorStop(1, "transparent");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Рваная золотая дуга нимба
+    ctx.strokeStyle = haloColor;
+    ctx.lineWidth = 3.5;
+    ctx.globalAlpha = 0.85;
+    for (let a = 0; a < Math.PI * 2; a += 0.32) {
+      if (rand() > 0.2) {
+        ctx.beginPath();
+        ctx.arc(W * 0.5, H * 0.42, 78 + (rand() - 0.5) * 5, a, a + 0.22);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    // ========================================================================
+    // СЮЖЕТ 1: «ТЕКИЛА САНСЕТ» (Экспрессионистский портрет Гарри Дюбуа)
+    // ========================================================================
+    if (artId === "tequila") {
+      // Мазки пиджака и поднятого воротника
+      paintStroke(35, 290, 82, 185, 44, "#1b2824", 0.95);
+      paintStroke(205, 290, 158, 185, 44, "#141f1c", 0.95);
+      paintStroke(65, 290, 175, 290, 55, "#23332e", 0.95);
+
+      // Белая рубашка ипылающий Ужасающий Галстук
+      paintStroke(120, 182, 120, 265, 26, "#d8cbb8", 0.9);
+      paintStroke(118, 192, 124, 285, 16, "#e04825", 0.95);
+      paintStroke(122, 205, 114, 260, 9, "#f5b82e", 0.9);
+      paintStroke(114, 225, 128, 245, 6, "#38bdf8", 0.85);
+
+      // Шея в глубокой тени
+      paintStroke(105, 148, 118, 192, 34, "#6e3b2c", 0.92);
+      paintStroke(132, 148, 124, 192, 28, "#47231b", 0.92);
+
+      // Лепка лица грубыми цветными плоскостями (охра, кадмий красный, синеватые тени)
+      paintStroke(88, 72, 92, 152, 38, "#c98a63", 0.95);
+      paintStroke(148, 72, 144, 152, 38, "#9c5c42", 0.95);
+      paintStroke(118, 65, 118, 158, 42, "#d99f76", 0.95);
+
+      // Алкогольный румянец и прожилки на скулах и переносице (фирменный красный мазок Ростова)
+      paintStroke(78, 114, 112, 122, 22, "#c84638", 0.82);
+      paintStroke(162, 114, 128, 122, 22, "#a33227", 0.82);
+      paintStroke(118, 88, 121, 128, 15, "#d1493b", 0.9);
+      paintStroke(108, 72, 134, 76, 16, "#e8b88a", 0.85); // Блик на лбу
+
+      // Бакенбарды и густые усы «Выражения»
+      paintStroke(72, 102, 78, 162, 24, "#2e1d14", 0.95);
+      paintStroke(168, 102, 160, 162, 24, "#24160e", 0.95);
+      paintStroke(82, 138, 120, 132, 18, "#382318", 0.96);
+      paintStroke(158, 138, 120, 132, 18, "#291911", 0.96);
+
+      // Безумная ухмылка «Выражения»
+      paintStroke(98, 149, 142, 147, 8, "#170f0b", 0.95);
+      paintStroke(104, 148, 134, 147, 4, "#e8dec8", 0.88);
+
+      // Глубокие глазницы и лихорадочный взгляд
+      paintStroke(84, 96, 108, 98, 12, "#1c1311", 0.95);
+      paintStroke(132, 98, 156, 96, 12, "#1c1311", 0.95);
+      paintStroke(92, 97, 99, 97, 5, health === "BAD" ? "#ff3b28" : "#7dd3fc", 0.98);
+      paintStroke(140, 97, 147, 97, 5, health === "BAD" ? "#ff3b28" : "#7dd3fc", 0.98);
+
+      // Растрёпанные вихри волос
+      paintStroke(68, 82, 95, 42, 24, "#2b1c13", 0.94);
+      paintStroke(95, 44, 148, 42, 26, "#3b271b", 0.94);
+      paintStroke(145, 44, 174, 86, 22, "#1f140d", 0.94);
+    }
+
+    // ========================================================================
+    // СЮЖЕТ 2: НАВЫК «ИНТЕРФЕЙС» (Сюрреалистичный многорукий бог машин)
+    // ========================================================================
+    if (artId === "interfacing") {
+      // Золотые магнитные диски и концентрические дорожки
+      ctx.save();
+      ctx.strokeStyle = "#f2b441";
+      ctx.lineWidth = 4;
+      for (let r = 24; r <= 88; r += 16) {
+        ctx.beginPath();
+        ctx.arc(120, 112, r, 0.2, Math.PI * 1.75);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Абстрактная золотая голова-призма
+      paintStroke(120, 48, 92, 125, 26, "#d99326", 0.92);
+      paintStroke(120, 48, 148, 125, 26, "#9c6214", 0.92);
+      paintStroke(96, 125, 144, 125, 28, "#f5c76b", 0.92);
+      paintStroke(120, 75, 120, 155, 14, "#14100c", 0.95);
+
+      // Веер механических пальцев/рук, считывающих дорожки диска
+      const handAngles = [-0.9, -0.5, -0.15, 0.2, 0.55, 0.95];
+      handAngles.forEach((ang, idx) => {
+        const xStart = 120 + Math.sin(ang) * 25;
+        const yStart = 240;
+        const xMid = 120 + Math.sin(ang) * 75;
+        const yMid = 165 - Math.cos(ang) * 25;
+        const xTip = 120 + Math.sin(ang) * 95;
+        const yTip = 115 - Math.cos(ang) * 55;
+        paintStroke(
+          xStart,
+          yStart,
+          xMid,
+          yMid,
+          12,
+          idx % 2 === 0 ? "#e09f3e" : "#b87324",
+          0.92
+        );
+        paintStroke(xMid, yMid, xTip, yTip, 6, "#fff0c2", 0.95);
+      });
+    }
+
+    // ========================================================================
+    // СЮЖЕТ 3: «ВНУТРЕННЯЯ ИМПЕРИЯ» (Сюрреалистическая туманность Сероты вместо головы)
+    // ========================================================================
+    if (artId === "inland") {
+      // Строгий тёмный пиджак без головы
+      paintStroke(38, 290, 82, 182, 46, "#1a1423", 0.96);
+      paintStroke(202, 290, 158, 182, 46, "#120d18", 0.96);
+      paintStroke(85, 185, 155, 185, 32, "#2a1e38", 0.95);
+
+      // Взрыв фиолетово-бирюзовой Сероты и осколков памяти вместо лица
+      const nebulaColors = ["#7b52ab", "#a67ce0", "#e0533c", "#48bfe3", "#f7d08a"];
+      for (let i = 0; i < 38; i++) {
+        const ang = (i / 38) * Math.PI * 2;
+        const r1 = 8 + rand() * 25;
+        const r2 = 45 + rand() * 58;
+        paintStroke(
+          120 + Math.cos(ang) * r1,
+          108 + Math.sin(ang) * r1,
+          120 + Math.cos(ang + 0.25) * r2,
+          108 + Math.sin(ang + 0.25) * r2,
+          8 + rand() * 14,
+          nebulaColors[i % nebulaColors.length],
+          0.85
+        );
+      }
+      // Тёмное ядро пустоты в центре
+      paintStroke(105, 95, 135, 118, 28, "#0d0912", 0.95);
+      paintStroke(112, 104, 128, 104, 6, "#fff5e4", 0.98);
+    }
+
+    // ========================================================================
+    // СЮЖЕТ 4: «КИМ КИЦУРАГИ» (Оранжевый бомбер и белые блики очков)
+    // ========================================================================
+    if (artId === "kim") {
+      // Ярко-оранжевая куртка-бомбер мазками кадмия
+      paintStroke(32, 290, 78, 178, 48, "#d95326", 0.96);
+      paintStroke(208, 290, 162, 178, 48, "#9e3614", 0.96);
+      paintStroke(65, 240, 175, 255, 42, "#e86838", 0.92);
+      paintStroke(92, 172, 148, 172, 26, "#1f1d1b", 0.96); // Тёмный воротник
+
+      // Скулы и лицо в полутени
+      paintStroke(90, 72, 96, 154, 34, "#cfa07e", 0.95);
+      paintStroke(150, 72, 144, 154, 34, "#8f6247", 0.95);
+      paintStroke(120, 68, 120, 158, 36, "#deb392", 0.95);
+
+      // Чёрные волосы и чёткий силуэт
+      paintStroke(82, 66, 158, 64, 26, "#141312", 0.98);
+
+      // Культовые очки Кима — два резких белых мазка мастихином
+      paintStroke(82, 98, 114, 100, 16, "#f0f9ff", 0.98);
+      paintStroke(126, 100, 158, 98, 16, "#bae6fd", 0.98);
+      paintStroke(78, 98, 162, 98, 3, "#111111", 0.95);
+
+      // Спокойная линия рта и поднятая бровь
+      paintStroke(104, 142, 136, 141, 5, "#2b1b14", 0.95);
+    }
+
+    // 4. Финальные экспрессионистские брызги и царапины холста поверх портрета
+    for (let s = 0; s < 18; s++) {
+      const sx = rand() * W;
+      const sy = rand() * H;
+      paintStroke(
+        sx,
+        sy,
+        sx + (rand() - 0.5) * 35,
+        sy + (rand() - 0.5) * 35,
+        2 + rand() * 3,
+        s % 3 === 0 ? "#f4d35e" : s % 3 === 1 ? "#e0533c" : "#48bfe3",
+        0.55
+      );
+    }
+  }, [artId, health, temp]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={240}
+      height={290}
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "block",
+        filter: "contrast(1.15) saturate(1.18)",
+      }}
+    />
+  );
+}
+
+// ============================================================================
+// 4. БАЗА ДАННЫХ ДИСКОВ (ДЕМО-ПРОФИЛИ + ПАРСЕР РЕАЛЬНОГО ЖЕЛЕЗА)
 // ============================================================================
 
 const INITIAL_DRIVES: DriveProfile[] = [
   {
     id: "nvme_c",
     letter: "C:",
-    name: "РАДИОКОМПЬЮТЕР РГМ-41 (Системный)",
-    model: "Samsung SSD 980 PRO 1TB (Revachol Precinct #41)",
+    name: "РАДИОКОМПЬЮТЕР РГМ-41",
+    model: "Samsung SSD 980 PRO 1TB",
     capacityGB: 1000.2,
     firmware: "5B2QGXA7",
     serial: "S69ENF0R841951K",
@@ -81,19 +478,20 @@ const INITIAL_DRIVES: DriveProfile[] = [
     features: "S.M.A.R.T., TRIM, VolatileWriteCache",
     healthStatus: "GOOD",
     healthPercent: 96,
+    moralePercent: 92,
     temperature: 41,
     totalReadsGB: 14820,
     totalWritesGB: 19450,
     powerOnCount: 1412,
     powerOnHours: 4890,
-    rotationRate: "---- (SSD / Твердотельный)",
+    rotationRate: "---- (Твердотельный NVMe)",
     introQuote:
       "Кремниевый кристалл тихо пульсирует на частоте четырёх линий PCIe 4.0. Память свежа, дорожки чисты, ни одного потерянного воспоминания.",
     attributes: [
       {
         id: "01",
         name: "Critical Warning",
-        ruName: "Критические предупреждения контроллера",
+        ruName: "Аварийный регистр флагов NVMe",
         current: 100,
         worst: 100,
         threshold: 0,
@@ -104,20 +502,20 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ЭНЦИКЛОПЕДИЯ",
             category: "INT",
             difficulty: "Легко: Успех",
-            text: "Регистр 01h в спецификации NVMe — это битовая маска аварийных флагов: нехватка резервных блоков, деградация надёжности, перегрев или переход в режим «только чтение». Сейчас все биты равны нулю.",
+            text: "Байт 01h в спецификации NVM Express — это битовая маска катастроф: износ резервных ячеек, перегрев свыше порога или блокировка записи. Сейчас все биты хранят ледяное молчание (00h).",
           },
           {
             skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
             category: "PSY",
             difficulty: "Средне: Успех",
-            text: "Тишина в эфире. Никаких сирен, никаких криков из глубин кремния. Этот диск ещё не видел настоящего ужаса.",
+            text: "Внутри кристалла темно и спокойно. Никаких призраков удалённых системных папок.",
           },
         ],
       },
       {
         id: "02",
         name: "Composite Temperature",
-        ruName: "Составная температура датчиков",
+        ruName: "Составная температура кристалла",
         current: 100,
         worst: 82,
         threshold: 85,
@@ -129,13 +527,7 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ИНТЕРФЕЙС",
             category: "MOT",
             difficulty: "Легко: Успех",
-            text: "41 градус Цельсия — рабочая температура здорового контроллера под медным радиатором. Троттлинг начинается лишь после 70–78 °C.",
-          },
-          {
-            skill: "ТРЕПЕТ",
-            category: "FYS",
-            difficulty: "Средне: Успех",
-            text: "Тёплый воздух выдувается сквозь пыльную решётку системного блока, согревая холодный утренний воздух Мартинеза.",
+            text: "41 °C — тёплая пульсация контроллера Elpis под медной пластиной радиатора. До теплового троттлинга ещё целых тридцать градусов запаса.",
           },
         ],
       },
@@ -154,14 +546,14 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ЛОГИКА",
             category: "INT",
             difficulty: "Легко: Успех",
-            text: "Неразмеченный пул резервных ячеек (Over-Provisioning) нетронут — 100% при критическом пороге 10%. Алгоритм выравнивания износа работает безупречно.",
+            text: "Скрытый заводской пул резервных ячеек (Over-Provisioning) цел на 100%. Ни один блок флеш-памяти ещё не вышел из строя.",
           },
         ],
       },
       {
         id: "05",
         name: "Percentage Used",
-        ruName: "Степень выработки ресурса NAND",
+        ruName: "Выработка гарантированного ресурса (TBW)",
         current: 96,
         worst: 96,
         threshold: 0,
@@ -170,16 +562,10 @@ const INITIAL_DRIVES: DriveProfile[] = [
         status: "GOOD",
         voices: [
           {
-            skill: "ЭНЦИКЛОПЕДИЯ",
-            category: "INT",
-            difficulty: "Средне: Успех",
-            text: "Израсходовано всего 4% гарантированного ресурса перезаписи (TBW). Оксидный слой в ячейках V-NAND почти не накопил паразитных электронов.",
-          },
-          {
             skill: "ВОЛЯ",
             category: "PSY",
             difficulty: "Легко: Успех",
-            text: "Запас прочности 96%. Ты скорее сотрёшь собственные воспоминания, чем исчерпаешь этот накопитель.",
+            text: "Израсходовано всего 4% ресурса затворов. Этот накопитель переживёт и это расследование, и следующую зиму в Ревашоле.",
           },
         ],
       },
@@ -194,10 +580,10 @@ const INITIAL_DRIVES: DriveProfile[] = [
         status: "GOOD",
         voices: [
           {
-            skill: "МАТЕМАТИЧЕСКИЙ АНАЛИЗ",
+            skill: "ВИЗУАЛЬНЫЙ АНАЛИЗ",
             category: "INT",
-            difficulty: "Легко: Успех",
-            text: "Чтение не разрушает туннельный диэлектрик флеш-памяти. 14.8 терабайт прочитанных архивов прошли без единого пробоя.",
+            difficulty: "Средне: Успех",
+            text: "Чтение не истощает оксидный слой транзисторов. 14.8 терабайт прочитанных протоколов прошли без единого пробоя.",
           },
         ],
       },
@@ -215,32 +601,14 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ИНТЕРФЕЙС",
             category: "MOT",
             difficulty: "Средне: Успех",
-            text: "Около 19.4 ТБ хост-записи при паспортном ресурсе 600 ТБ. Коэффициент усиления записи (Write Amplification) в норме.",
-          },
-        ],
-      },
-      {
-        id: "0C",
-        name: "Power Cycles",
-        ruName: "Количество циклов включения питания",
-        current: 100,
-        worst: 100,
-        threshold: 0,
-        rawDec: 1412,
-        status: "GOOD",
-        voices: [
-          {
-            skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
-            category: "PSY",
-            difficulty: "Легко: Успех",
-            text: "Тысяча четыреста двенадцать пробуждений из небытия. Каждое утро начинается с подачи +3.3 Вольта на шину.",
+            text: "19.4 ТБ записанных данных при гарантированном пороге 600 ТБ. Контроллер равномерно распределяет износ по всем банкам памяти.",
           },
         ],
       },
       {
         id: "0D",
         name: "Unsafe Shutdowns",
-        ruName: "Небезопасные отключения питания",
+        ruName: "Аварийные отключения питания",
         current: 100,
         worst: 100,
         threshold: 0,
@@ -251,25 +619,7 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "БОЛЕВОЙ ПОРОГ",
             category: "FYS",
             difficulty: "Средне: Успех",
-            text: "19 раз рубильник вышибало наживую, без команды Standby Immediate. Конденсаторы успевали сбросить таблицу трансляции адресов (FTL) в последний миг перед темнотой.",
-          },
-        ],
-      },
-      {
-        id: "0E",
-        name: "Media and Data Integrity Errors",
-        ruName: "Неисправимые ошибки целостности среды",
-        current: 100,
-        worst: 100,
-        threshold: 0,
-        rawDec: 0,
-        status: "GOOD",
-        voices: [
-          {
-            skill: "ЛОГИКА",
-            category: "INT",
-            difficulty: "Легко: Успех",
-            text: "Ноль ошибок LDPC-коррекции. Все контрольные суммы сходятся до последнего бита.",
+            text: "19 раз питание обрывалось без предупреждения. Короткие микроудары тока по таблице трансляции адресов, после которых прошивка каждый раз собирала себя заново.",
           },
         ],
       },
@@ -278,67 +628,31 @@ const INITIAL_DRIVES: DriveProfile[] = [
   {
     id: "hdd_d",
     letter: "D:",
-    name: "АРХИВ ДОПРОСОВ (Магнитный HDD)",
+    name: "АРХИВ УЧАСТКА №41 (HDD)",
     model: "WDC WD20EZBX-00AYRA0 2000.3 GB",
     capacityGB: 2000.3,
     firmware: "01.01A01",
     serial: "WD-WCC4M8192041",
     interfaceType: "Serial ATA",
     transferMode: "SATA/600 | SATA/600",
-    standard: "ACS-3 | ATA8-ACS version 4c",
+    standard: "ACS-3 | ATA8-ACS",
     features: "S.M.A.R.T., NCQ, GPL",
     healthStatus: "CAUTION",
-    healthPercent: 64,
-    temperature: 51,
+    healthPercent: 58,
+    moralePercent: 54,
+    temperature: 52,
     totalReadsGB: 84120,
     totalWritesGB: 61390,
     powerOnCount: 5340,
     powerOnHours: 34820,
     rotationRate: "7200 RPM",
     introQuote:
-      "Из глубины гермоблока доносится глухой металлический скрежет. Шпиндель крутит блины со скоростью 7200 оборотов в минуту уже четыре года подряд. В секторах завелась ржавчина.",
+      "Из глубины гермоблока доносится глухой металлический рокот. Шпиндель вращает магнитные блины уже четыре года подряд. В секторах завелась ржавчина.",
     attributes: [
-      {
-        id: "01",
-        name: "Raw Read Error Rate",
-        ruName: "Частота ошибок чтения с магнитной поверхности",
-        current: 184,
-        worst: 179,
-        threshold: 51,
-        rawDec: 148,
-        status: "GOOD",
-        voices: [
-          {
-            skill: "ИНТЕРФЕЙС",
-            category: "MOT",
-            difficulty: "Средне: Успех",
-            text: "Магниторезистивная головка спотыкается о микродефекты напыления. Пока код Рида — Соломона вытягивает данные со второй попытки.",
-          },
-        ],
-      },
-      {
-        id: "03",
-        name: "Spin-Up Time",
-        ruName: "Время раскрутки пакета пластин (мс)",
-        current: 162,
-        worst: 158,
-        threshold: 21,
-        rawDec: 4890,
-        unit: "мс",
-        status: "GOOD",
-        voices: [
-          {
-            skill: "ЭНЦИКЛОПЕДИЯ",
-            category: "INT",
-            difficulty: "Легко: Успех",
-            text: "4.89 секунды от подачи тока на обмотки статора до стабилизации 7200 об/мин. Гидродинамический подшипник ещё держит вязкость смазки.",
-          },
-        ],
-      },
       {
         id: "05",
         name: "Reallocated Sectors Count",
-        ruName: "Число переназначенных секторов (Bad Blocks)",
+        ruName: "Переназначенные сектора (Bad Blocks)",
         current: 140,
         worst: 140,
         threshold: 140,
@@ -349,13 +663,13 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "БОЛЕВОЙ ПОРОГ",
             category: "FYS",
             difficulty: "Сложно: Успех",
-            text: "Сорок восемь шрамов на зеркальной поверхности диска! Контроллер признал эти сектора мёртвыми и перенаправил адреса в резервную зону (Spare Area). Но каждый раз, когда головка ищет их, ей приходится метаться через всю пластину.",
+            text: "Сорок восемь выжженных кратеров на магнитном слое! Контроллер вывел их из обращения и перенаправил чтение в резервную зону, но головкам приходится судорожно метаться через весь радиус пластины.",
           },
           {
             skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
             category: "PSY",
             difficulty: "Средне: Успех",
-            text: "Так начинается амнезия. Сначала выпадают отдельные слова из старых отчётов за 51-й год. Потом — целые лица.",
+            text: "Именно так умирает человеческая память. Сначала выпадают имена и даты, потом — целые годы жизни.",
           },
         ],
       },
@@ -371,29 +685,10 @@ const INITIAL_DRIVES: DriveProfile[] = [
         status: "GOOD",
         voices: [
           {
-            skill: "ЛОГИКА",
-            category: "INT",
-            difficulty: "Легко: Успех",
-            text: "34 820 часов — это без малого 4 года непрерывного вращения без сна и выходных. Механический износ вступил в зрелую фазу.",
-          },
-        ],
-      },
-      {
-        id: "C2",
-        name: "Temperature",
-        ruName: "Температура гермоблока",
-        current: 99,
-        worst: 86,
-        threshold: 0,
-        rawDec: 51,
-        unit: "°C",
-        status: "CAUTION",
-        voices: [
-          {
-            skill: "СУМРАЧНЫЙ",
+            skill: "ТРЕПЕТ",
             category: "FYS",
             difficulty: "Средне: Успех",
-            text: "51 градус для жёсткого диска — это жарковато! Металл расширяется, тепловой дрейф уводит дорожки из-под сервометок.",
+            text: "Тридцать четыре тысячи восемьсот двадцать часов под гул кулеров в прокуренном подвале участка. За окном сменилось шестнадцать сезонов дождей, а шпиндель ни разу не остановился.",
           },
         ],
       },
@@ -411,20 +706,20 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ЭНЦИКЛОПЕДИЯ",
             category: "INT",
             difficulty: "Сложно: Успех",
-            text: "Атрибут C5h (14 секторов) — самая опасная метрика. Эти сектора уже не читаются, но диск ждёт перезаписи, чтобы проверить, софт-ошибка это или физический кратер. Любой файл, попавший на эти 14 блоков, вызовет зависание ввода-вывода.",
+            text: "Регистр C5h (14 секторов) — предвестник беды. Эти блоки уже не отдают контрольную сумму ECC при чтении. Любой файл, попавший в эти 14 секторов, намертво повесит поток ввода-вывода.",
           },
           {
             skill: "АВТОРИТЕТ",
             category: "PSY",
             difficulty: "Легко: Успех",
-            text: "Немедленно скопируй отсюда особо важные улики, детектив. Второй попытки этот диск тебе не даст.",
+            text: "Немедленно эвакуируй отсюда ценные данные, детектив. Не жди, пока 14 нестабильных секторов превратятся в 1400.",
           },
         ],
       },
       {
         id: "C7",
         name: "UltraDMA CRC Error Count",
-        ruName: "Ошибки контрольной суммы кабеля SATA (CRC)",
+        ruName: "Ошибки контрольной суммы шлейфа SATA",
         current: 200,
         worst: 199,
         threshold: 0,
@@ -435,7 +730,7 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ИНТЕРФЕЙС",
             category: "MOT",
             difficulty: "Легко: Успех",
-            text: "7 ошибок передачи по шлейфу SATA. Скорее всего, окислился контакт или кабель перегнули под крышкой корпуса.",
+            text: "7 битых пакетов на физическом уровне SATA-кабеля. Подоткни разъём плотнее до щелчка металлической защёлки.",
           },
         ],
       },
@@ -444,44 +739,27 @@ const INITIAL_DRIVES: DriveProfile[] = [
   {
     id: "pale_e",
     letter: "E:",
-    name: "КАТУШКА «ФОРТ-МОРАЛЬ» (Поглощён Серотой)",
+    name: "КАТУШКА «ФОРТ-МОРАЛЬ» (СЕРОТА)",
     model: "SEAGATE ST1000DM003-9YN162 1000.2 GB",
     capacityGB: 1000.2,
     firmware: "CC4B",
     serial: "Z1D4PALE0091",
     interfaceType: "Serial ATA",
-    transferMode: "SATA/300 | SATA/600 (Деградация линии)",
+    transferMode: "SATA/150 | SATA/600 (Аварийный сброс)",
     standard: "ATA8-ACS",
-    features: "S.M.A.R.T. (АВАРИЙНЫЙ СТАТУС)",
+    features: "S.M.A.R.T. (КРИТИЧЕСКИЙ ОТКАЗ)",
     healthStatus: "BAD",
-    healthPercent: 12,
-    temperature: 64,
+    healthPercent: 11,
+    moralePercent: 18,
+    temperature: 63,
     totalReadsGB: 192400,
     totalWritesGB: 144800,
     powerOnCount: 11204,
     powerOnHours: 68410,
-    rotationRate: "7200 RPM (Дисбаланс шпинделя)",
+    rotationRate: "7200 RPM (Биение вала)",
     introQuote:
-      "Ритмичное «клац... клац... клац» режет тишину комнаты. Магнитный слой осыпается в микроскопическую пыль. Серота уже внутри гермокамеры — она пожирает файловую таблицу NTFS.",
+      "Ритмичное «клац... клац... клац» режет тишину. Магнитный слой осыпается в бурую пыль. Серота уже внутри гермокамеры — она пожирает таблицу разделов.",
     attributes: [
-      {
-        id: "01",
-        name: "Raw Read Error Rate",
-        ruName: "Частота ошибок чтения поверхности",
-        current: 34,
-        worst: 31,
-        threshold: 6,
-        rawDec: 8941204,
-        status: "CAUTION",
-        voices: [
-          {
-            skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
-            category: "PSY",
-            difficulty: "Невозможно: Успех",
-            text: "Восемь миллионов девятьсот тысяч попыток вспомнить то, чего больше нет. Головка бьётся о пустоту, как мотылёк о треснувшее стекло фонаря.",
-          },
-        ],
-      },
       {
         id: "05",
         name: "Reallocated Sectors Count",
@@ -496,20 +774,20 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ЛОГИКА",
             category: "INT",
             difficulty: "Легко: Успех",
-            text: "Текущее нормализованное значение (12) пробило заводской порог отказа (Threshold = 36). Заводской список дефектов G-List полностью исчерпан — новые битые сектора больше некуда перенаправлять.",
+            text: "Нормализованное здоровье атрибута (12) рухнуло ниже заводского порога смерти (Threshold = 36). Резервная таблица G-List переполнена (2418 секторов) — диску больше некуда прятать дыры.",
           },
           {
-            skill: "БОЛЕВОЙ ПОРОГ",
+            skill: "СУМРАЧНЫЙ",
             category: "FYS",
             difficulty: "Легко: Успех",
-            text: "Две тысячи четыреста восемнадцать сквозных ран. Это клиническая смерть магнитного носителя.",
+            text: "Он мёртв, братан. Он просто ещё по инерции крутит блины, потому что ты не выдернул из него разъём питания.",
           },
         ],
       },
       {
         id: "0A",
         name: "Spin Retry Count",
-        ruName: "Повторные попытки раскрутки шпинделя",
+        ruName: "Неудачные попытки раскрутки шпинделя",
         current: 68,
         worst: 60,
         threshold: 97,
@@ -520,33 +798,14 @@ const INITIAL_DRIVES: DriveProfile[] = [
             skill: "ИНТЕРФЕЙС",
             category: "MOT",
             difficulty: "Средне: Успех",
-            text: "43 раза мотор не смог преодолеть заклинивание подшипника с первой подачи тока. Драйверу Smooth L7250 приходится давать форсированный импульс.",
-          },
-        ],
-      },
-      {
-        id: "C2",
-        name: "Temperature",
-        ruName: "Критическая температура корпуса",
-        current: 36,
-        worst: 32,
-        threshold: 45,
-        rawDec: 64,
-        unit: "°C",
-        status: "BAD",
-        voices: [
-          {
-            skill: "СТОЙКОСТЬ",
-            category: "FYS",
-            difficulty: "Средне: Успех",
-            text: "64 °C! Трение заклинивающего шпинделя раскаляет алюминиевый корпус до состояния печки. Не прикасайся к нему голыми пальцами.",
+            text: "43 срыва старта мотора. Загустевшая смазка клинит подшипник, а пусковой ток выжигает мосфеты на плате контроллера.",
           },
         ],
       },
       {
         id: "C6",
         name: "Uncorrectable Sector Count",
-        ruName: "Неисправимые ошибки секторов (Фатальная потеря данных)",
+        ruName: "Неисправимые ошибки чтения (Потеря данных)",
         current: 41,
         worst: 41,
         threshold: 0,
@@ -554,10 +813,10 @@ const INITIAL_DRIVES: DriveProfile[] = [
         status: "BAD",
         voices: [
           {
-            skill: "ДРАМА",
-            category: "INT",
-            difficulty: "Средне: Успех",
-            text: "612 секторов канули в Сероту навсегда, сир! Никакой `chkdsk /r` и никакая молитва Долорес Дей не вернут эти байты.",
+            skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
+            category: "PSY",
+            difficulty: "Невозможно: Успех",
+            text: "Шестьсот двенадцать фрагментов реальности растворились в белом шуме Сероты. Там были фотографии, старые курсовые и чьи-то голоса. Теперь там только нули.",
           },
         ],
       },
@@ -565,40 +824,32 @@ const INITIAL_DRIVES: DriveProfile[] = [
   },
 ];
 
-// ============================================================================
-// 3. ПАРСЕР РЕАЛЬНОГО ОТЧЁТА CRYSTALDISKINFO / SMARTCTL
-// ============================================================================
-
+// Парсер отчёта CrystalDiskInfo / smartctl
 function parseRealSmartReport(rawText: string): DriveProfile | null {
   const lines = rawText.split(/\r?\n/);
-  if (lines.length < 4) return null;
+  if (lines.length < 3) return null;
 
-  let model = "Импортированный накопитель (Полевой терминал)";
+  let model = "Полевой накопитель РГМ";
   let firmware = "1.00";
-  let serial = "REV-0041-X";
+  let serial = "REV-0041";
   let interfaceType = "NVM Express / SATA";
   let transferMode = "PCIe / SATA-600";
-  let temperature = 42;
-  let healthPercent = 95;
+  let temperature = 40;
+  let healthPercent = 98;
   let healthStatus: HealthState = "GOOD";
-  let powerOnHours = 1200;
-  let powerOnCount = 300;
-  let totalReadsGB = 5000;
-  let totalWritesGB = 4500;
+  let powerOnHours = 950;
+  let powerOnCount = 210;
+  let totalReadsGB = 4200;
+  let totalWritesGB = 3800;
 
   for (const line of lines) {
     const l = line.trim();
-    if (/^(Model|Device Model|Model Number)\s*:/i.test(l)) {
-      model = l.split(":")[1]?.trim() || model;
-    } else if (/^Firmware(\s+Version)?\s*:/i.test(l)) {
-      firmware = l.split(":")[1]?.trim() || firmware;
-    } else if (/^Serial\s*Number\s*:/i.test(l)) {
-      serial = l.split(":")[1]?.trim() || serial;
-    } else if (/^Interface\s*:/i.test(l)) {
-      interfaceType = l.split(":")[1]?.trim() || interfaceType;
-    } else if (/^Transfer\s*Mode\s*:/i.test(l)) {
-      transferMode = l.split(":")[1]?.trim() || transferMode;
-    } else if (/^Temperature\s*:/i.test(l)) {
+    if (/^(Model|Device Model|Model Number)\s*:/i.test(l)) model = l.split(":")[1]?.trim() || model;
+    else if (/^Firmware(\s+Version)?\s*:/i.test(l)) firmware = l.split(":")[1]?.trim() || firmware;
+    else if (/^Serial\s*Number\s*:/i.test(l)) serial = l.split(":")[1]?.trim() || serial;
+    else if (/^Interface\s*:/i.test(l)) interfaceType = l.split(":")[1]?.trim() || interfaceType;
+    else if (/^Transfer\s*Mode\s*:/i.test(l)) transferMode = l.split(":")[1]?.trim() || transferMode;
+    else if (/^Temperature\s*:/i.test(l)) {
       const m = l.match(/(\d+)\s*C/i);
       if (m) temperature = parseInt(m[1], 10);
     } else if (/^Health\s*Status\s*:/i.test(l)) {
@@ -612,20 +863,14 @@ function parseRealSmartReport(rawText: string): DriveProfile | null {
     } else if (/^Power\s*On\s*Count\s*:/i.test(l)) {
       const m = l.match(/(\d+)/);
       if (m) powerOnCount = parseInt(m[1], 10);
-    } else if (/^Total\s*Host\s*Reads\s*:/i.test(l)) {
-      const m = l.match(/(\d+)/);
-      if (m) totalReadsGB = parseInt(m[1], 10);
-    } else if (/^Total\s*Host\s*Writes\s*:/i.test(l)) {
-      const m = l.match(/(\d+)/);
-      if (m) totalWritesGB = parseInt(m[1], 10);
     }
   }
 
   const parsedAttrs: SmartAttribute[] = [];
-
   for (const line of lines) {
-    // 1. Формат CrystalDiskInfo (ATA): ID Cur Wor Thr RawValues(6 байт HEX) AttributeName
-    const cdiAta = line.trim().match(/^([0-9A-Fa-f]{2})\s+(\d+)\s+(\d+)\s+(\d+)\s+([0-9A-Fa-f]{8,16})\s+(.+)$/);
+    const cdiAta = line
+      .trim()
+      .match(/^([0-9A-Fa-f]{2})\s+(\d+)\s+(\d+)\s+(\d+)\s+([0-9A-Fa-f]{8,16})\s+(.+)$/);
     if (cdiAta) {
       const id = cdiAta[1].toUpperCase();
       const cur = parseInt(cdiAta[2], 10);
@@ -633,7 +878,6 @@ function parseRealSmartReport(rawText: string): DriveProfile | null {
       const thr = parseInt(cdiAta[4], 10);
       const rawDec = parseInt(cdiAta[5], 16) || 0;
       const name = cdiAta[6].trim();
-
       let st: HealthState = "GOOD";
       if (thr > 0 && cur <= thr) st = "BAD";
       else if ((id === "05" || id === "C5" || id === "C6") && rawDec > 0) st = "CAUTION";
@@ -641,7 +885,7 @@ function parseRealSmartReport(rawText: string): DriveProfile | null {
       parsedAttrs.push({
         id,
         name,
-        ruName: `Атрибут S.M.A.R.T. (${name})`,
+        ruName: `Аппаратный регистр ${id}h (${name})`,
         current: cur,
         worst: wor,
         threshold: thr,
@@ -649,996 +893,699 @@ function parseRealSmartReport(rawText: string): DriveProfile | null {
         status: st,
         voices: [
           {
-            skill: "ЭНЦИКЛОПЕДИЯ",
-            category: "INT",
+            skill: "ИНТЕРФЕЙС",
+            category: "MOT",
             difficulty: "Средне: Успех",
-            text: `Считан аппаратный регистр ${id}h (${name}). Нормализованное значение: ${cur} (порог отказа: ${thr}), необработанный счётчик RAW: ${rawDec}.`,
-          },
-          {
-            skill: "ИНТЕРФЕЙС",
-            category: "MOT",
-            difficulty: "Легко: Успех",
-            text:
-              st === "GOOD"
-                ? "Сигнал с датчика чистый, отклонений от заводской калибровки не обнаружено."
-                : "Внимание: счётчик зафиксировал аппаратные аномалии на физическом уровне носителя!",
-          },
-        ],
-      });
-      continue;
-    }
-
-    // 2. Формат CrystalDiskInfo (NVMe): ID RawValues(HEX) AttributeName
-    const cdiNvme = line.trim().match(/^([0-9A-Fa-f]{2})\s+([0-9A-Fa-f]{8,16})\s+(.+)$/);
-    if (cdiNvme) {
-      const id = cdiNvme[1].toUpperCase();
-      const rawDec = parseInt(cdiNvme[2], 16) || 0;
-      const name = cdiNvme[3].trim();
-      parsedAttrs.push({
-        id,
-        name,
-        ruName: `Регистр NVMe (${name})`,
-        current: 100,
-        worst: 100,
-        threshold: 0,
-        rawDec,
-        status: "GOOD",
-        voices: [
-          {
-            skill: "ИНТЕРФЕЙС",
-            category: "MOT",
-            difficulty: "Легко: Успех",
-            text: `Лог контроллера NVMe [${id}h — ${name}]: десятичное значение счётчика равно ${rawDec.toLocaleString("ru-RU")}.`,
+            text: `Считан живой регистр ${id}h (${name}) вашего диска: нормализованное здоровье ${cur} при пороге ${thr}, счётчик событий RAW = ${rawDec}.`,
           },
         ],
       });
     }
-  }
-
-  if (parsedAttrs.some((a) => a.status === "BAD")) healthStatus = "BAD";
-  else if (parsedAttrs.some((a) => a.status === "CAUTION") && healthStatus === "GOOD") {
-    healthStatus = "CAUTION";
   }
 
   return {
-    id: `custom_${Date.now()}`,
-    letter: "X:",
-    name: `ПОЛЕВОЙ ДИСК (${model.slice(0, 22)})`,
+    id: `real_${Date.now()}`,
+    letter: "R:",
+    name: `РЕАЛЬНЫЙ ДИСК ПК (${model.slice(0, 18)})`,
     model,
     capacityGB: 1000.0,
     firmware,
     serial,
     interfaceType,
     transferMode,
-    standard: "Импорт S.M.A.R.T.-дамп",
-    features: "S.M.A.R.T., Пользовательский дамп",
+    standard: "Реальный дамп S.M.A.R.T.",
+    features: "S.M.A.R.T., Аппаратная телеметрия",
     healthStatus,
     healthPercent,
+    moralePercent: 90,
     temperature,
     totalReadsGB,
     totalWritesGB,
     powerOnCount,
     powerOnHours,
-    rotationRate: "Импортировано",
-    introQuote:
-      "Свежая перфолента загружена прямо в приёмную щель радиокомпьютера. Навыки приступают к вскрытию телеметрии вашего накопителя.",
-    attributes:
-      parsedAttrs.length > 0
-        ? parsedAttrs
-        : INITIAL_DRIVES[0].attributes,
+    rotationRate: "Аппаратный дамп",
+    isRealHardware: true,
+    introQuote: "Прямое подключение к контроллеру вашего компьютера установлено.",
+    attributes: parsedAttrs.length > 0 ? parsedAttrs : INITIAL_DRIVES[0].attributes,
   };
 }
 
 // ============================================================================
-// 4. ЭКСПРЕССИОНИСТСКИЙ SVG-ПОРТРЕТ (ДИНАМИЧЕСКИ РЕАГИРУЕТ НА ЗДОРОВЬЕ И ТЕМПЕРАТУРУ)
+// 5. ГЛАВНЫЙ КОМПОНЕНТ «DISCO DISK ELYSIUM»
 // ============================================================================
 
-function DiscoPortrait({
-  persona,
-  health,
-  temp,
-}: {
-  persona: PersonaId;
-  health: HealthState;
-  temp: number;
-}) {
-  const isOverheated = temp >= 55;
-  const bgColors =
-    health === "GOOD"
-      ? ["#1d3532", "#345952", "#c88a3b"]
-      : health === "CAUTION"
-      ? ["#3a2814", "#7c471c", "#d9822b"]
-      : ["#381212", "#6e1b1b", "#d93829"];
-
-  return (
-    <svg
-      viewBox="0 0 220 260"
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "block",
-        filter: "contrast(1.12) saturate(1.1)",
-      }}
-    >
-      <defs>
-        <linearGradient id="discoBg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor={bgColors[0]} />
-          <stop offset="55%" stopColor={bgColors[1]} />
-          <stop offset="100%" stopColor={bgColors[2]} />
-        </linearGradient>
-        <radialGradient id="heatGlow" cx="50%" cy="45%" r="55%">
-          <stop
-            offset="0%"
-            stopColor={isOverheated ? "#ff3b1f" : "#eab308"}
-            stopOpacity={isOverheated ? "0.55" : "0.18"}
-          />
-          <stop offset="100%" stopColor="#000" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-
-      {/* Фон в стиле мазков масляной живописи Ростова */}
-      <rect width="220" height="260" fill="url(#discoBg)" />
-      <circle cx="110" cy="115" r="95" fill="url(#heatGlow)" />
-
-      {/* Экспрессионистские диагональные мазки кисти на фоне */}
-      <polygon points="0,40 90,0 130,0 0,85" fill="rgba(255,255,255,0.05)" />
-      <polygon points="220,110 120,260 175,260 220,180" fill="rgba(0,0,0,0.28)" />
-      <polygon
-        points="15,200 205,30 220,55 35,230"
-        fill={health === "BAD" ? "rgba(220,38,38,0.18)" : "rgba(212,163,89,0.1)"}
-      />
-
-      {/* Нимб мыслей / корона */}
-      <circle
-        cx="110"
-        cy="105"
-        r="72"
-        fill="none"
-        stroke={health === "GOOD" ? "#5fa89a" : health === "CAUTION" ? "#e09f3e" : "#e63946"}
-        strokeWidth="2.5"
-        strokeDasharray="12 6 4 6"
-        opacity="0.7"
-      />
-
-      {persona === "harry" && (
-        <g>
-          {/* Плечи и пиджак РГМ с поднятым воротником */}
-          <path
-            d="M20,260 L42,188 L78,168 L110,195 L142,168 L178,188 L200,260 Z"
-            fill="#242f2b"
-            stroke="#111"
-            strokeWidth="2"
-          />
-          {/* Ужасающий галстук (светится при перегреве или ошибке) */}
-          <polygon
-            points="103,188 117,188 124,258 110,265 96,258"
-            fill={isOverheated || health === "BAD" ? "#ff2a1f" : "#c85a32"}
-            stroke="#f4d35e"
-            strokeWidth="1.5"
-          />
-          {/* Шея и угловатые скулы */}
-          <polygon points="88,145 132,145 138,190 82,190" fill="#b88463" />
-          <polygon
-            points="66,68 154,68 160,132 136,166 84,166 60,132"
-            fill="#d49b78"
-            stroke="#2a1b14"
-            strokeWidth="2.5"
-          />
-          {/* Экспрессионистские тени на лице (красноватый нос и щёки) */}
-          <polygon points="64,108 98,112 92,142 68,136" fill="rgba(185, 55, 45, 0.48)" />
-          <polygon points="156,108 122,112 128,142 152,136" fill="rgba(185, 55, 45, 0.48)" />
-          <polygon points="103,95 117,95 122,128 98,128" fill="#ba5648" />
-          {/* Густые бакенбарды и усы Кусто ("Выражение") */}
-          <path
-            d="M60,105 Q55,152 88,162 L92,136 L128,136 L132,162 Q165,152 160,105 L148,108 Q146,135 128,128 L92,128 Q74,135 72,108 Z"
-            fill="#3d2b1f"
-            stroke="#1b120c"
-            strokeWidth="1.5"
-          />
-          {/* Растрёпанные волосы */}
-          <path
-            d="M56,88 Q48,42 92,44 Q112,32 142,45 Q174,52 162,92 L148,72 L110,64 L70,74 Z"
-            fill="#3a291e"
-          />
-          {/* Глаза (меняются от состояния диска) */}
-          {health === "GOOD" ? (
-            <>
-              <rect x="76" y="92" width="20" height="8" fill="#1b1917" />
-              <rect x="124" y="92" width="20" height="8" fill="#1b1917" />
-              <circle cx="86" cy="96" r="2.5" fill="#7dd3fc" />
-              <circle cx="134" cy="96" r="2.5" fill="#7dd3fc" />
-            </>
-          ) : health === "CAUTION" ? (
-            <>
-              <polygon points="74,88 98,94 96,101 74,97" fill="#1b1917" />
-              <polygon points="146,88 122,94 124,101 146,97" fill="#1b1917" />
-              <circle cx="86" cy="95" r="2.5" fill="#fbbf24" />
-              <circle cx="134" cy="95" r="2.5" fill="#fbbf24" />
-            </>
-          ) : (
-            <>
-              <circle cx="86" cy="95" r="8" fill="#1b1917" />
-              <circle cx="134" cy="95" r="8" fill="#1b1917" />
-              <circle cx="86" cy="95" r="3.5" fill="#ef4444" />
-              <circle cx="134" cy="95" r="3.5" fill="#ef4444" />
-            </>
-          )}
-          {/* Ухмылка Кусто или гримаса боли */}
-          {health === "BAD" ? (
-            <path d="M94,148 Q110,138 126,148" stroke="#111" strokeWidth="3" fill="none" />
-          ) : (
-            <path d="M92,143 Q110,153 128,142" stroke="#f5ebe0" strokeWidth="2.5" fill="none" />
-          )}
-        </g>
-      )}
-
-      {persona === "kim" && (
-        <g>
-          {/* Оранжевая куртка-бомбер Кима Кицураги */}
-          <path
-            d="M18,260 L38,182 L82,166 L110,196 L138,166 L182,182 L202,260 Z"
-            fill="#c85a28"
-            stroke="#1b1410"
-            strokeWidth="2.5"
-          />
-          {/* Тёмный воротник и белая футболка */}
-          <polygon points="82,166 110,202 138,166 126,160 110,182 94,160" fill="#2b2623" />
-          {/* Лицо Кима */}
-          <polygon
-            points="72,68 148,68 152,128 130,162 90,162 68,128"
-            fill="#d8a886"
-            stroke="#1f1712"
-            strokeWidth="2"
-          />
-          {/* Волосы и пробор */}
-          <path d="M68,84 Q70,46 110,46 Q150,46 152,84 L144,68 L76,68 Z" fill="#181615" />
-          {/* Культовые очки Кима с бликами */}
-          <rect
-            x="72"
-            y="88"
-            width="32"
-            height="19"
-            rx="2"
-            fill="rgba(224, 242, 254, 0.85)"
-            stroke="#18181b"
-            strokeWidth="2.5"
-          />
-          <rect
-            x="116"
-            y="88"
-            width="32"
-            height="19"
-            rx="2"
-            fill="rgba(224, 242, 254, 0.85)"
-            stroke="#18181b"
-            strokeWidth="2.5"
-          />
-          <line x1="104" y1="95" x2="116" y2="95" stroke="#18181b" strokeWidth="2.5" />
-          {/* Усы и спокойная линия рта */}
-          <path d="M95,134 L125,134" stroke="#181615" strokeWidth="3" />
-          <path
-            d={health === "BAD" ? "M98,144 L122,144" : "M98,142 Q110,145 122,142"}
-            stroke="#2b1d16"
-            strokeWidth="2"
-            fill="none"
-          />
-        </g>
-      )}
-
-      {persona === "radiocomputer" && (
-        <g>
-          {/* Ламповый корпус Радиокомпьютера Сюр-ла-Кле */}
-          <rect
-            x="46"
-            y="42"
-            width="128"
-            height="178"
-            rx="8"
-            fill="#23201c"
-            stroke="#9a7b4f"
-            strokeWidth="3"
-          />
-          {/* Внутренняя вакуумная колба */}
-          <rect
-            x="64"
-            y="60"
-            width="92"
-            height="110"
-            rx="42"
-            fill="#141816"
-            stroke="#5c6b64"
-            strokeWidth="2"
-          />
-          {/* Раскалённая нить накала (светится сильнее с ростом температуры) */}
-          <path
-            d="M86,155 L96,88 L110,122 L124,88 L134,155"
-            fill="none"
-            stroke={health === "BAD" || isOverheated ? "#ff3b1f" : "#f59e0b"}
-            strokeWidth="4"
-          />
-          <circle
-            cx="110"
-            cy="108"
-            r="26"
-            fill={health === "BAD" ? "rgba(239,68,68,0.45)" : "rgba(245,158,11,0.35)"}
-          />
-          {/* Шкала амперметра внизу */}
-          <rect x="64" y="182" width="92" height="24" fill="#d8cbb8" stroke="#111" strokeWidth="1.5" />
-          <line
-            x1="110"
-            y1="204"
-            x2={health === "GOOD" ? "92" : health === "CAUTION" ? "115" : "142"}
-            y2="185"
-            stroke="#991b1b"
-            strokeWidth="2.5"
-          />
-        </g>
-      )}
-
-      {/* Рамка портрета с потертостями */}
-      <rect
-        x="4"
-        y="4"
-        width="212"
-        height="252"
-        fill="none"
-        stroke="#c2a370"
-        strokeWidth="2"
-        opacity="0.65"
-      />
-    </svg>
-  );
-}
-
-// ============================================================================
-// 5. ГЛАВНЫЙ КОМПОНЕНТ «CRYSTAL DISK ELYSIUM // РАДИОКОМПЬЮТЕР РГМ»
-// ============================================================================
-
-export default function CrystalDiskElysium() {
+export default function DiscoDiskElysium() {
   const [drives, setDrives] = useState<DriveProfile[]>(INITIAL_DRIVES);
   const [activeDriveIdx, setActiveDriveIdx] = useState<number>(0);
-  const [persona, setPersona] = useState<PersonaId>("harry");
+  const [artPiece, setArtPiece] = useState<ArtPieceId>("tequila");
   const [rawFormat, setRawFormat] = useState<"HEX16" | "DEC10">("HEX16");
-  const [selectedAttrId, setSelectedAttrId] = useState<string>("05");
-
-  // Симуляция перегрева / деградации на лету
+  const [selectedAttrId, setSelectedAttrId] = useState<string>("01");
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [tempOffset, setTempOffset] = useState<number>(0);
 
-  // Модальное окно импорта реального отчёта CrystalDiskInfo / smartctl
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [importText, setImportText] = useState<string>("");
+  const [lastDice, setLastDice] = useState<[number, number] | null>(null);
 
-  // Реальная оценка браузерного хранилища (Web Storage API)
-  const [browserStorage, setBrowserStorage] = useState<{ usedGB: string; quotaGB: string } | null>(
-    null
-  );
-
-  // Лента диалогов / голосов справа (как в Disco Elysium)
   const [dialogueLog, setDialogueLog] = useState<DialogueEntry[]>([
     {
-      id: "init_1",
-      timestamp: "08:42",
-      skill: "РАДИОКОМПЬЮТЕР РГМ",
+      id: "d1",
+      skill: "ДРЕВНИЙ РЕПТИЛЬНЫЙ МОЗГ",
       category: "SYS",
-      checkResult: "INFO",
-      text: "Перфокарта телеметрии S.M.A.R.T. вставлена в считыватель. Нажмите на любую строку таблицы атрибутов или выберите диск сверху, чтобы услышать вердикт навыков.",
+      text: "Нет ничего. Только тёплая тьма внутри алюминиевого корпуса и мерное шуршание электронов по шине PCI Express. А потом — разряд конденсатора. Подача +12 Вольт.",
     },
     {
-      id: "init_2",
-      timestamp: "08:42",
-      skill: "ЭНЦИКЛОПЕДИЯ",
-      category: "INT",
+      id: "d2",
+      skill: "ИНТЕРФЕЙС",
+      category: "MOT",
       difficulty: "Легко: Успех",
-      checkResult: "SUCCESS",
-      text: "Технология S.M.A.R.T. (Self-Monitoring, Analysis and Reporting Technology) была разработана в 1995 году, чтобы предупреждать оператора о неминуемой гибели накопителя за несколько суток до краха.",
+      text: "Радиокомпьютер участка №41 завершил опрос шины S.M.A.R.T. Перед тобой три катушки памяти. Нажми на любую строчку регистра в центре или брось кубики внизу, чтобы начать допрос.",
     },
     {
-      id: "init_3",
-      timestamp: "08:43",
+      id: "d3",
       skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
       category: "PSY",
       difficulty: "Средне: Успех",
-      checkResult: "SUCCESS",
-      text: "Кремний и намагниченный кобальт помнят всё, что ты удалял в корзину. Даже то, о чём ты предпочёл бы забыть навсегда.",
+      text: "Осторожнее с диском [E:], детектив. От него веет Серотой и осыпавшимся оксидом железа.",
     },
   ]);
 
-  // Состояние броска кубиков 2d6
-  const [lastDiceRoll, setLastDiceRoll] = useState<[number, number] | null>(null);
-  const logEndRef = useRef<HTMLDivElement | null>(null);
+  const logBottomRef = useRef<HTMLDivElement | null>(null);
 
+  // Автоподхват реальных дисков, если запущено внутри Electron-приложения (.exe / .deb / .dmg)
   useEffect(() => {
-    if (typeof navigator !== "undefined" && navigator.storage && navigator.storage.estimate) {
-      navigator.storage.estimate().then((est) => {
-        if (est.quota) {
-          setBrowserStorage({
-            usedGB: ((est.usage || 0) / (1024 * 1024 * 1024)).toFixed(2),
-            quotaGB: (est.quota / (1024 * 1024 * 1024)).toFixed(1),
-          });
-        }
-      });
+    const win = window as unknown as {
+      electronSMART?: { getRealDrives: () => Promise<DriveProfile[]> };
+    };
+    if (win.electronSMART && typeof win.electronSMART.getRealDrives === "function") {
+      win.electronSMART
+        .getRealDrives()
+        .then((realDrives) => {
+          if (Array.isArray(realDrives) && realDrives.length > 0) {
+            setDrives([...realDrives, ...INITIAL_DRIVES]);
+            setActiveDriveIdx(0);
+          }
+        })
+        .catch(() => {});
     }
   }, []);
 
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    logBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [dialogueLog]);
 
   const activeDrive = drives[activeDriveIdx] || drives[0];
   const effectiveTemp = activeDrive.temperature + tempOffset;
 
   const effectiveHealth: HealthState = useMemo(() => {
-    if (activeDrive.healthStatus === "BAD" || effectiveTemp >= 62) return "BAD";
-    if (activeDrive.healthStatus === "CAUTION" || effectiveTemp >= 52) return "CAUTION";
+    if (activeDrive.healthStatus === "BAD" || effectiveTemp >= 60) return "BAD";
+    if (activeDrive.healthStatus === "CAUTION" || effectiveTemp >= 50) return "CAUTION";
     return "GOOD";
   }, [activeDrive.healthStatus, effectiveTemp]);
 
-  // Переключение накопителя сверху
+  const toggleSound = () => {
+    audioEngine.enabled = !soundEnabled;
+    setSoundEnabled(!soundEnabled);
+  };
+
   const handleSelectDrive = (idx: number) => {
+    const drv = drives[idx];
     setActiveDriveIdx(idx);
     setTempOffset(0);
-    const drv = drives[idx];
-    const now = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    audioEngine.playActuatorClick(drv.healthStatus);
+
+    if (drv.healthStatus === "BAD") setArtPiece("inland");
+    else if (drv.healthStatus === "CAUTION") setArtPiece("interfacing");
 
     setDialogueLog((prev) => [
       ...prev,
       {
-        id: `drv_${Date.now()}_1`,
-        timestamp: now,
-        skill: `ПЕРЕКЛЮЧЕНИЕ КАНАЛА // ДИСК ${drv.letter}`,
+        id: `sel_${Date.now()}`,
+        skill: `КОММУТАТОР КАНАЛОВ // ТОМ [${drv.letter}]`,
         category: "SYS",
-        checkResult: "INFO",
         text: `${drv.model} (${drv.capacityGB} ГБ). ${drv.introQuote}`,
       },
     ]);
   };
 
-  // Клик по строке S.M.A.R.T.-таблицы вызывает голоса навыков в правой ленте
   const handleInspectAttribute = (attr: SmartAttribute) => {
     setSelectedAttrId(attr.id);
-    const now = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    audioEngine.playActuatorClick(attr.status);
 
-    const newEntries: DialogueEntry[] = attr.voices.map((v, i) => ({
-      id: `attr_${attr.id}_${Date.now()}_${i}`,
-      timestamp: now,
-      skill: v.skill,
-      category: v.category,
-      difficulty: v.difficulty,
-      checkResult: "SUCCESS",
-      text: v.text,
-      attrId: attr.id,
-    }));
+    const newLines: DialogueEntry[] = [
+      {
+        id: `you_${Date.now()}`,
+        skill: "ТЫ",
+        category: "YOU",
+        text: `«Проверить регистр [${attr.id}h] — ${attr.name} (${attr.ruName})»`,
+      },
+      ...attr.voices.map((v, idx) => ({
+        id: `v_${Date.now()}_${idx}`,
+        skill: v.skill,
+        category: v.category,
+        difficulty: v.difficulty,
+        checkResult: "SUCCESS" as const,
+        text: v.text,
+      })),
+    ];
 
-    setDialogueLog((prev) => [...prev, ...newEntries]);
+    setDialogueLog((prev) => [...prev, ...newLines]);
   };
 
-  // Белая проверка навыка 2d6 («Постучать по корпусу и считать скрытые сектора»)
-  const handleRollSkillCheck = () => {
+  const handleRollWhiteCheck = () => {
     const d1 = Math.floor(Math.random() * 6) + 1;
     const d2 = Math.floor(Math.random() * 6) + 1;
-    setLastDiceRoll([d1, d2]);
+    setLastDice([d1, d2]);
 
-    const bonus = effectiveHealth === "GOOD" ? 3 : effectiveHealth === "CAUTION" ? 1 : -1;
-    const total = d1 + d2 + bonus;
-    const isSuccess = (d1 === 6 && d2 === 6) || ( !(d1 === 1 && d2 === 1) && total >= 8 );
-    const now = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    const mod = effectiveHealth === "GOOD" ? 3 : effectiveHealth === "CAUTION" ? 1 : -1;
+    const sum = d1 + d2 + mod;
+    const success = (d1 === 6 && d2 === 6) || (!(d1 === 1 && d2 === 1) && sum >= 8);
 
-    if (isSuccess) {
-      setDialogueLog((prev) => [
-        ...prev,
-        {
-          id: `roll_${Date.now()}`,
-          timestamp: now,
-          skill: `ИНТЕРФЕЙС [Кубики: ${d1} + ${d2} (мод. ${bonus >= 0 ? `+${bonus}` : bonus}) = ${total} против 8]`,
-          category: "MOT",
-          difficulty: "Белая проверка: УСПЕХ",
-          checkResult: "SUCCESS",
-          text:
-            effectiveHealth === "GOOD"
-              ? "Твои пальцы ощущают ровную высокочастотную вибрацию дросселей питания. Контроллер мгновенно откликается по шине PCIe: скрытых бэд-блоков за пределами заводской таблицы не обнаружено."
-              : "Сквозь гул мотора ты улавливаешь микрозадержку позиционирования на цилиндре #41892. Если сбросить кэш записи прямо сейчас и перенести папку с уликами, ты спасёшь 99.8% архива до того, как поверхность осыплется окончательно!",
-        },
-      ]);
-    } else {
-      setDialogueLog((prev) => [
-        ...prev,
-        {
-          id: `roll_${Date.now()}`,
-          timestamp: now,
-          skill: `РУКА-ГЛАЗ [Кубики: ${d1} + ${d2} (мод. ${bonus >= 0 ? `+${bonus}` : bonus}) = ${total} против 8]`,
-          category: "MOT",
-          difficulty: "Белая проверка: ПРОВАЛ",
-          checkResult: "FAILURE",
-          text: "Ты слишком сильно хлопаешь ладонью по пыльной крышке системного блока. Кулер взвывает на максимальных оборотах, а парковочная головка издаёт обиженный щелчок. Лучше не будить лихо, пока оно пишет в таблицу MFT.",
-        },
-      ]);
-    }
-  };
+    audioEngine.playDiceRoll(success);
 
-  // Импорт реального текстового дампа CrystalDiskInfo
-  const handleImportSubmit = () => {
-    const parsed = parseRealSmartReport(importText);
-    if (!parsed) return;
-    const nextDrives = [...drives, parsed];
-    setDrives(nextDrives);
-    setActiveDriveIdx(nextDrives.length - 1);
-    setShowImportModal(false);
-    setImportText("");
-
-    const now = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
     setDialogueLog((prev) => [
       ...prev,
       {
-        id: `imp_${Date.now()}`,
-        timestamp: now,
-        skill: "ЛОГИКА [Синтез внешнего дампа]",
-        category: "INT",
-        difficulty: "Легко: Успех",
-        checkResult: "SUCCESS",
-        text: `В систему загружен реальный накопитель «${parsed.model}». Считано ${parsed.attributes.length} регистров S.M.A.R.T., температура: ${parsed.temperature} °C, наработка: ${parsed.powerOnHours} ч.`,
+        id: `you_roll_${Date.now()}`,
+        skill: "ТЫ",
+        category: "YOU",
+        text: `🎲 [ИНТЕРФЕЙС: Белая проверка — Сложность 8] Приложить ладонь к корпусу ${activeDrive.letter} и прослушать резонанс дорожек.`,
+      },
+      {
+        id: `res_roll_${Date.now()}`,
+        skill: `ИНТЕРФЕЙС [Бросок: ${d1} + ${d2} ${mod >= 0 ? `+ ${mod}` : `- ${Math.abs(mod)}`} = ${sum}]`,
+        category: "MOT",
+        difficulty: success ? "УСПЕХ" : "ПРОВАЛ",
+        checkResult: success ? "SUCCESS" : "FAILURE",
+        text: success
+          ? effectiveHealth === "GOOD"
+            ? "Ты закрываешь глаза и сливаешься с шиной данных. Поток команд NVMe чист, как горный воздух над Инсулиндией: ни одной задержки чтения свыше 50 микросекунд."
+            : "Пальцы улавливают предательскую дрожь шагового актуатора на дорожке 0x004F1A! Ты вовремя посылаешь команду принудительного сброса кэша (Flush Cache) — таблица разделов спасена от разрушения."
+          : "Шум кулеров и гул трансформатора сливаются в неразборчивую какофонию. Твоя рука соскальзывает со стальной крышки корпуса, оставляя жирный след на заводской пломбе.",
       },
     ]);
   };
 
-  const formatRawValue = (decVal: number) => {
-    if (rawFormat === "DEC10") {
-      return decVal.toLocaleString("ru-RU");
-    }
-    return decVal.toString(16).toUpperCase().padStart(12, "0");
+  const handleImportSubmit = () => {
+    const parsed = parseRealSmartReport(importText);
+    if (!parsed) return;
+    const updated = [parsed, ...drives];
+    setDrives(updated);
+    setActiveDriveIdx(0);
+    setShowImportModal(false);
+    setImportText("");
+    audioEngine.playDiceRoll(true);
+
+    setDialogueLog((prev) => [
+      ...prev,
+      {
+        id: `imp_${Date.now()}`,
+        skill: "ЭНЦИКЛОПЕДИЯ",
+        category: "INT",
+        difficulty: "Легко: Успех",
+        text: `Свежая перфокарта принята! Накопитель «${parsed.model}» (${parsed.temperature} °C, здоровье ${parsed.healthPercent}%) подключён к каналу [R:].`,
+      },
+    ]);
   };
 
-  const skillColor = (cat: DialogueEntry["category"]) => {
+  const formatRaw = (dec: number) =>
+    rawFormat === "DEC10" ? dec.toLocaleString("ru-RU") : dec.toString(16).toUpperCase().padStart(12, "0");
+
+  const getSkillColor = (cat: DialogueEntry["category"]) => {
     switch (cat) {
       case "INT":
-        return "#5fa8d3"; // Голубой Интеллект
+        return "#48bfe3"; // Интеллект (Церулеум)
       case "PSY":
-        return "#9d75cb"; // Фиолетовая Психика
+        return "#9d65c9"; // Психика (Аметист)
       case "FYS":
-        return "#d1495b"; // Бордовая Физика
+        return "#e0485a"; // Физика (Красный кармин)
       case "MOT":
-        return "#e09f3e"; // Янтарная Моторика
+        return "#f2a93b"; // Моторика (Кадмий жёлто-охристый)
+      case "YOU":
+        return "#e8dec8";
       default:
-        return "#c2a370";
+        return "#c29b61";
     }
   };
 
+  // Расчёт сегментов Здоровья (10 делений) и Морали (10 делений) как в HUD Disco Elysium
+  const healthPips = Math.max(1, Math.round(activeDrive.healthPercent / 10));
+  const moralePips = Math.max(1, Math.round(activeDrive.moralePercent / 10));
+
   return (
-    <div className="disco-root">
-      {/* АВТОНОМНЫЙ CSS В ЭСТЕТИКЕ DISCO ELYSIUM (МАСЛЯНАЯ ЖИВОПИСЬ, ЛАТУНЬ И ЛЕНТА ДИАЛОГОВ) */}
+    <div className="elysium-viewport">
+      {/* SVG-ФИЛЬТР ФАКТУРЫ МАСЛЯНОГО ХОЛСТА И КРАКЕЛЮРА */}
+      <svg style={{ position: "absolute", width: 0, height: 0 }}>
+        <filter id="canvas-grain">
+          <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="3" result="noise" />
+          <feColorMatrix
+            type="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.045 0"
+          />
+          <feComposite in2="SourceGraphic" in="noise" operator="in" />
+        </filter>
+      </svg>
+
+      {/* АВТОНОМНЫЕ СТИЛИ И ПОДГРУЗКА ШРИФТОВ OSWALD + CORMORANT GARAMOND */}
       <style
         dangerouslySetInnerHTML={{
           __html: `
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,400;1,600&family=JetBrains+Mono:wght@400;600;700&family=Oswald:wght@500;600;700&display=swap');
+
         * { box-sizing: border-box; }
         body, html {
           margin: 0;
           padding: 0;
-          background-color: #141210;
-          color: #e6dcc8;
-          font-family: "Georgia", "Times New Roman", "Palatino Linotype", serif;
-          font-size: 14px;
+          background-color: #0d0b09;
+          color: #e8dec8;
+          font-family: 'Cormorant Garamond', Georgia, serif;
+          font-size: 16px;
           -webkit-font-smoothing: antialiased;
         }
-        .mono {
-          font-family: "Courier New", "Consolas", "JetBrains Mono", monospace;
+        .font-oswald {
+          font-family: 'Oswald', Impact, sans-serif;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+        }
+        .font-mono {
+          font-family: 'JetBrains Mono', Consolas, monospace;
           font-variant-numeric: tabular-nums;
         }
-        .disco-root {
+        .elysium-viewport {
           min-height: 100vh;
           display: flex;
           flex-direction: column;
+          position: relative;
           background:
-            radial-gradient(circle at 18% 12%, rgba(194, 90, 50, 0.16), transparent 42%),
-            radial-gradient(circle at 75% 85%, rgba(62, 102, 92, 0.18), transparent 45%),
-            linear-gradient(180deg, #181512 0%, #12100e 100%);
+            radial-gradient(circle at 14% 22%, rgba(217, 83, 38, 0.22), transparent 38%),
+            radial-gradient(circle at 48% 10%, rgba(43, 110, 104, 0.24), transparent 42%),
+            radial-gradient(circle at 82% 78%, rgba(123, 82, 171, 0.16), transparent 45%),
+            linear-gradient(180deg, #16120e 0%, #0d0b09 100%);
         }
-        /* Верхняя панель выбора дисков (как в CrystalDiskInfo, но в латунной рамке РГМ) */
-        .top-deck {
-          background: #1b1815;
-          border-bottom: 2px solid #6e5a3e;
-          padding: 10px 22px;
+        /* Зернистая масляная плёнка поверх всего экрана */
+        .elysium-viewport::after {
+          content: "";
+          position: fixed;
+          inset: 0;
+          pointer-events: none;
+          z-index: 40;
+          background-image: radial-gradient(rgba(232, 222, 200, 0.04) 1px, transparent 0);
+          background-size: 3px 3px;
+        }
+
+        /* ВЕРХНЯЯ ШАПКА В СТИЛЕ ДОСЬЕ МАРТИНЕЗА */
+        .martinaise-topbar {
+          background: linear-gradient(90deg, #171310 0%, #241b15 50%, #14110e 100%);
+          border-bottom: 2px solid #8c6d46;
+          padding: 10px 24px;
           display: flex;
           flex-wrap: wrap;
           align-items: center;
           justify-content: space-between;
           gap: 14px;
-          box-shadow: 0 6px 20px rgba(0,0,0,0.65);
+          box-shadow: 0 10px 30px rgba(0,0,0,0.85);
+          z-index: 20;
         }
-        .title-plaque {
+        .brand-cluster {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 14px;
         }
-        .rcm-stamp {
-          padding: 4px 10px;
-          background: #c85a32;
-          color: #141210;
-          font-weight: 900;
-          font-size: 12px;
-          letter-spacing: 0.1em;
-          border: 1px solid #e6dcc8;
-          text-transform: uppercase;
-        }
-        .app-name {
-          font-size: 19px;
+        .insulindian-seal {
+          padding: 5px 12px;
+          background: linear-gradient(135deg, #d95326, #9e2a1b);
+          color: #fff5e4;
           font-weight: 700;
-          letter-spacing: 0.04em;
-          color: #f3ead8;
-          text-transform: uppercase;
-          margin: 0;
+          font-size: 13px;
+          border: 1px solid #f2b441;
+          box-shadow: 3px 3px 0px #090706;
         }
-        .drive-tabs {
+        .main-heading {
+          font-size: 22px;
+          font-weight: 700;
+          color: #f5ebd6;
+          margin: 0;
+          text-shadow: 2px 2px 0px #000;
+        }
+
+        /* Карточки выбора дисков (как потрёпанные кассеты/дела) */
+        .cassette-strip {
           display: flex;
           flex-wrap: wrap;
-          gap: 8px;
+          gap: 10px;
         }
-        .drive-tab {
+        .cassette-tab {
           display: flex;
           align-items: center;
           gap: 10px;
           padding: 6px 14px;
-          background: #24201c;
-          border: 1px solid #524331;
-          color: #cbbba0;
+          background: #1c1713;
+          border: 1px solid #57442e;
+          color: #c7b69e;
           cursor: pointer;
-          transition: all 0.15s;
-          text-align: left;
+          transition: all 0.16s ease;
+          box-shadow: 3px 3px 0px rgba(0,0,0,0.6);
         }
-        .drive-tab:hover {
-          border-color: #c2a370;
-          background: #2c2722;
+        .cassette-tab:hover {
+          border-color: #d99326;
+          transform: translateY(-1px);
         }
-        .drive-tab.active {
-          background: linear-gradient(135deg, #36291e, #241d17);
-          border: 1.5px solid #d4a359;
+        .cassette-tab.active {
+          background: linear-gradient(135deg, #3d2417 0%, #1f2b28 100%);
+          border: 1.5px solid #f2b441;
           color: #fff;
-          box-shadow: 0 0 14px rgba(212, 163, 89, 0.25);
+          box-shadow: 0 0 18px rgba(242, 180, 65, 0.28), 3px 3px 0px #000;
         }
-        .status-dot {
-          width: 11px;
-          height: 11px;
-          border-radius: 50%;
-          display: inline-block;
-          border: 1px solid #111;
-        }
-        .dot-good { background: #4a9d7c; box-shadow: 0 0 8px #4a9d7c; }
-        .dot-caution { background: #e09f3e; box-shadow: 0 0 8px #e09f3e; }
-        .dot-bad { background: #d1495b; box-shadow: 0 0 8px #d1495b; }
 
-        /* Кнопки в стиле диалоговых опций Disco Elysium */
-        .disco-btn {
+        /* Кнопки с экспрессионистской жёсткой тенью */
+        . painterly-btn {
           padding: 7px 14px;
-          background: #26211d;
-          border: 1px solid #7c6647;
-          color: #e6dcc8;
-          font-family: "Georgia", serif;
+          background: #241d17;
+          border: 1.5px solid #8c6d46;
+          color: #f0e6d2;
+          font-family: 'Oswald', sans-serif;
           font-size: 12.5px;
-          font-weight: 700;
-          letter-spacing: 0.03em;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
           cursor: pointer;
-          transition: all 0.15s;
+          box-shadow: 3px 3px 0px #090806;
+          transition: all 0.14s ease;
         }
-        .disco-btn:hover {
-          background: #c85a32;
-          color: #141210;
-          border-color: #f3ead8;
-        }
-        .disco-btn-check {
-          background: linear-gradient(135deg, #382c1e, #261e15);
-          border: 1.5px solid #e09f3e;
-          color: #f4d35e;
-        }
-        .disco-btn-check:hover {
-          background: #e09f3e;
-          color: #141210;
+        .painterly-btn:hover {
+          background: #d95326;
+          color: #fff;
+          border-color: #f5ebd6;
+          transform: translate(-1px, -1px);
+          box-shadow: 4px 4px 0px #090806;
         }
 
-        /* Двухколоночная раскладка Disco Elysium: Слева приборная панель CrystalDiskInfo, Справа — Лента Голосов */
-        .main-stage {
+        /* ГЛАВНАЯ ТРЁХКОЛОНОЧНАЯ СЦЕНА DISCO ELYSIUM:
+           1. Левый столб: Портрет маслом + Шкалы Здоровья/Морали + Навыки-индикаторы
+           2. Центр: Паспорт диска и таблица регистров S.M.A.R.T.
+           3. Правый столб: Классическая тёмная лента диалога Disco Elysium */
+        .stage-grid {
           flex: 1;
           display: grid;
-          grid-template-columns: 1fr 410px;
-          min-height: calc(100vh - 64px);
+          grid-template-columns: 280px 1fr 430px;
+          min-height: calc(100vh - 68px);
         }
-        @media (max-width: 1150px) {
-          .main-stage {
+        @media (max-width: 1280px) {
+          .stage-grid {
+            grid-template-columns: 260px 1fr 370px;
+          }
+        }
+        @media (max-width: 1024px) {
+          .stage-grid {
             grid-template-columns: 1fr;
           }
         }
 
-        /* Левая часть (CrystalDiskInfo в стиле Ревашоля) */
-        .cdi-pane {
+        /* 1. ЛЕВЫЙ СТОЛБ (HUD ПОРТРЕТА И MORALE/HEALTH BARS) */
+        .left-hud {
+          background: linear-gradient(180deg, rgba(24, 19, 15, 0.94), rgba(14, 11, 9, 0.98));
+          border-right: 2px solid #57442e;
+          padding: 18px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+        /* Шкалы ЗДОРОВЬЕ (Красная) и МОРАЛЬ (Синяя) из Disco Elysium */
+        .vital-bars {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 10px 12px;
+          background: #14100d;
+          border: 1px solid #57442e;
+          box-shadow: inset 0 0 12px rgba(0,0,0,0.8);
+        }
+        .pip-row {
+          display: grid;
+          grid-template-columns: repeat(10, 1fr);
+          gap: 3px;
+          height: 10px;
+        }
+        .pip-cell {
+          background: #26201b;
+          border: 1px solid #000;
+        }
+        .pip-health-on {
+          background: linear-gradient(180deg, #ff5c4d, #b8252f);
+          box-shadow: 0 0 6px rgba(224, 72, 90, 0.6);
+        }
+        .pip-morale-on {
+          background: linear-gradient(180deg, #6ec1e4, #2b6ca3);
+          box-shadow: 0 0 6px rgba(72, 191, 227, 0.6);
+        }
+
+        /* Рама картины маслом */
+        .oil-frame {
+          position: relative;
+          height: 290px;
+          border: 3px solid #a68253;
+          outline: 1px solid #2b2117;
+          box-shadow: 6px 8px 0px #080605, 0 0 28px rgba(0,0,0,0.85);
+          background: #0e0c0a;
+          overflow: hidden;
+        }
+        .oil-caption {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          padding: 6px 10px;
+          background: linear-gradient(0deg, rgba(10,8,6,0.95) 0%, rgba(10,8,6,0.6) 75%, transparent 100%);
+          text-align: center;
+          font-size: 12px;
+          color: #f2b441;
+        }
+
+        /* Две карточки-печати (ТЕХСОСТОЯНИЕ и ТЕМПЕРАТУРА) в стиле ромбов навыков */
+        .tarot-card {
+          padding: 12px 14px;
+          border: 2px solid #8c6d46;
+          box-shadow: 4px 4px 0px #080605;
+          position: relative;
+          overflow: hidden;
+        }
+        .tarot-good {
+          background: linear-gradient(135deg, #173632 0%, #1f4e48 60%, #122422 100%);
+          border-color: #68c7b7;
+        }
+        .tarot-caution {
+          background: linear-gradient(135deg, #422310 0%, #7d4018 60%, #261409 100%);
+          border-color: #f2a93b;
+        }
+        .tarot-bad {
+          background: linear-gradient(135deg, #470f16 0%, #8a1c27 60%, #24070b 100%);
+          border-color: #ff4d5e;
+        }
+
+        /* 2. ЦЕНТРАЛЬНАЯ ЧАСТЬ (ДОСЬЕ ПАСПОРТА + S.M.A.R.T.) */
+        .center-dossier {
           padding: 20px 24px;
           display: flex;
           flex-direction: column;
           gap: 18px;
           overflow-y: auto;
         }
-        .cdi-hero {
+        .dossier-card {
+          background:
+            linear-gradient(135deg, rgba(33, 27, 22, 0.94), rgba(20, 17, 14, 0.96));
+          border: 1.5px solid #6e5536;
+          box-shadow: 6px 6px 0px #080705;
+          padding: 18px 20px;
+        }
+        .passport-grid {
           display: grid;
-          grid-template-columns: 205px 210px 1fr;
-          gap: 18px;
-          background: rgba(27, 24, 21, 0.9);
-          border: 1.5px solid #5c4b37;
-          padding: 16px;
-          box-shadow: inset 0 0 30px rgba(0,0,0,0.6);
+          grid-template-columns: 1fr 1fr;
+          gap: 8px 24px;
+          margin-top: 12px;
         }
-        @media (max-width: 920px) {
-          .cdi-hero {
-            grid-template-columns: 1fr;
-          }
+        @media (max-width: 720px) {
+          .passport-grid { grid-template-columns: 1fr; }
         }
-        .portrait-frame {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        .portrait-box {
-          height: 225px;
-          border: 2px solid #8a704c;
-          background: #141210;
-          overflow: hidden;
-        }
-        /* Крупные индикаторы CrystalDiskInfo (Техсостояние и Температура) */
-        .gauges-col {
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          gap: 12px;
-        }
-        .big-gauge {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          align-items: center;
-          padding: 12px;
-          border: 2px solid #6e5a3e;
-          text-align: center;
-          position: relative;
-        }
-        .gauge-good {
-          background: linear-gradient(180deg, rgba(42, 82, 70, 0.85), rgba(22, 44, 38, 0.95));
-          border-color: #5fa89a;
-        }
-        .gauge-caution {
-          background: linear-gradient(180deg, rgba(110, 68, 22, 0.88), rgba(58, 35, 11, 0.95));
-          border-color: #e09f3e;
-        }
-        .gauge-bad {
-          background: linear-gradient(180deg, rgba(115, 26, 26, 0.9), rgba(56, 12, 12, 0.96));
-          border-color: #e63946;
-        }
-        .gauge-label {
-          font-size: 11px;
-          text-transform: uppercase;
-          letter-spacing: 0.1em;
-          color: #d8cbb8;
-          margin-bottom: 4px;
-        }
-        .gauge-val {
-          font-size: 26px;
-          font-weight: 900;
-          letter-spacing: 0.03em;
-          color: #fff;
-          text-shadow: 0 2px 10px rgba(0,0,0,0.7);
-        }
-
-        /* Паспорт накопителя справа от индикаторов (как в CrystalDiskInfo) */
-        .passport-box {
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-        }
-        .drive-title-banner {
-          border-bottom: 1.5px solid #5c4b37;
-          padding-bottom: 8px;
-          margin-bottom: 10px;
+        .passport-line {
           display: flex;
           justify-content: space-between;
           align-items: baseline;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-        .meta-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px 20px;
-          font-size: 13px;
-        }
-        @media (max-width: 680px) {
-          .meta-grid { grid-template-columns: 1fr; }
-        }
-        .meta-row {
-          display: flex;
-          justify-content: space-between;
-          border-bottom: 1px dashed rgba(138, 112, 76, 0.35);
+          border-bottom: 1px dotted rgba(166, 130, 83, 0.35);
           padding: 4px 0;
         }
-        .meta-key {
-          color: #a89984;
-          font-size: 12.5px;
-        }
-        .meta-val {
-          color: #f3ead8;
-          font-weight: 700;
-          text-align: right;
-        }
 
-        /* Таблица S.M.A.R.T. */
-        .smart-panel {
-          background: rgba(24, 21, 18, 0.92);
-          border: 1.5px solid #5c4b37;
+        /* Таблица регистров S.M.A.R.T. с полосами износа */
+        .smart-table-wrap {
+          background: rgba(20, 16, 13, 0.95);
+          border: 1.5px solid #6e5536;
+          box-shadow: 6px 6px 0px #080705;
           flex: 1;
-          display: flex;
-          flex-direction: column;
         }
-        .smart-header {
-          padding: 10px 16px;
-          background: #231f1b;
-          border-bottom: 1.5px solid #5c4b37;
-          display: flex;
-          flex-wrap: wrap;
-          justify-content: space-between;
-          align-items: center;
-          gap: 10px;
-        }
-        .smart-table {
+        .disco-table {
           width: 100%;
           border-collapse: collapse;
-          font-size: 13px;
         }
-        .smart-table th {
-          background: #1a1714;
-          color: #b5a48b;
-          text-align: left;
-          padding: 9px 12px;
-          border-bottom: 1.5px solid #5c4b37;
+        .disco-table th {
+          background: #241c16;
+          color: #d4b88c;
+          font-family: 'Oswald', sans-serif;
           font-size: 12px;
+          letter-spacing: 0.07em;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
+          text-align: left;
+          padding: 10px 12px;
+          border-bottom: 2px solid #6e5536;
         }
-        .smart-table td {
-          padding: 8px 12px;
-          border-bottom: 1px solid rgba(92, 75, 55, 0.35);
-          color: #e6dcc8;
+        .disco-table td {
+          padding: 9px 12px;
+          border-bottom: 1px solid rgba(110, 85, 54, 0.28);
         }
-        .smart-table tr {
+        .disco-table tr {
           cursor: pointer;
           transition: background 0.12s;
         }
-        .smart-table tr:hover td {
-          background: rgba(200, 90, 50, 0.16);
+        .disco-table tr:hover td {
+          background: rgba(217, 83, 38, 0.18);
         }
-        .smart-table tr.selected-row td {
-          background: rgba(212, 163, 89, 0.22);
-          border-top: 1px solid #d4a359;
-          border-bottom: 1px solid #d4a359;
+        .disco-table tr.active-attr td {
+          background: linear-gradient(90deg, rgba(217, 83, 38, 0.28), rgba(242, 180, 65, 0.14));
+          border-top: 1px solid #f2b441;
+          border-bottom: 1px solid #f2b441;
         }
 
-        /* ПРАВАЯ КОЛОНКА — ИКОНИЧЕСКАЯ ЛЕНТА МЫСЛЕЙ DISCO ELYSIUM */
-        .dialogue-column {
+        /* 3. ПРАВЫЙ СТОЛБ — КАНОНИЧНАЯ ТЁМНАЯ ЛЕНТА ДИАЛОГА DISCO ELYSIUM */
+        .right-tape {
           background:
-            linear-gradient(180deg, #1b1714 0%, #120f0d 100%);
-          border-left: 2px solid #6e5a3e;
+            radial-gradient(circle at 50% 0%, rgba(217, 83, 38, 0.12), transparent 35%),
+            linear-gradient(180deg, #120f0c 0%, #0b0908 100%);
+          border-left: 2px solid #6e5536;
           display: flex;
           flex-direction: column;
-          height: calc(100vh - 64px);
+          height: calc(100vh - 68px);
           position: sticky;
-          top: 64px;
-          box-shadow: -8px 0 28px rgba(0,0,0,0.7);
+          top: 68px;
+          box-shadow: -12px 0 36px rgba(0,0,0,0.85);
         }
-        @media (max-width: 1150px) {
-          .dialogue-column {
-            height: 600px;
+        @media (max-width: 1024px) {
+          .right-tape {
+            height: 620px;
             position: static;
-            border-left: none;
-            border-top: 2px solid #6e5a3e;
           }
         }
-        .dialogue-header {
-          padding: 12px 18px;
-          background: #231e1a;
-          border-bottom: 1.5px solid #5c4b37;
+        .tape-header {
+          padding: 12px 20px;
+          background: #1b1511;
+          border-bottom: 1.5px solid #57442e;
           display: flex;
           justify-content: space-between;
           align-items: center;
         }
-        .dialogue-scroll {
+        .tape-scroll {
           flex: 1;
           overflow-y: auto;
-          padding: 18px 20px;
+          padding: 22px 24px;
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          gap: 18px;
         }
-        .thought-entry {
-          border-left: 3px solid #c85a32;
-          padding-left: 13px;
-          line-height: 1.58;
-          animation: fadeIn 0.25s ease-out;
+        .dialogue-block {
+          padding-left: 14px;
+          border-left: 3px solid #d95326;
+          animation: slideUp 0.22s ease-out;
         }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(6px); }
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(8px); }
           to { opacity: 1; transform: translateY(0); }
         }
-        .skill-title {
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-          font-weight: 900;
-          font-size: 12.5px;
-          letter-spacing: 0.06em;
+        .dialogue-actor {
+          font-family: 'Oswald', sans-serif;
+          font-size: 13.5px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
           text-transform: uppercase;
         }
-        .skill-diff {
-          font-size: 11.5px;
-          color: #9e8f79;
-          margin-left: 6px;
+        .dialogue-check-tag {
+          font-family: 'Cormorant Garamond', serif;
           font-style: italic;
-        }
-        .thought-text {
-          margin-top: 4px;
-          color: #f0e6d2;
           font-size: 14px;
+          color: #a89984;
+          margin-left: 8px;
         }
-        .dialogue-footer {
-          padding: 14px 18px;
-          background: #1f1a16;
-          border-top: 1.5px solid #5c4b37;
+        .dialogue-prose {
+          margin-top: 4px;
+          font-size: 17.5px;
+          line-height: 1.48;
+          color: #f2ead8;
+        }
+        /* Красная полоса выбора действия внизу ленты (как в Disco Elysium) */
+        .red-choice-box {
+          padding: 16px 20px;
+          background: #17120e;
+          border-top: 2px solid #6e5536;
           display: flex;
           flex-direction: column;
           gap: 10px;
         }
-        .dice-box {
-          display: inline-flex;
-          gap: 6px;
-          align-items: center;
+        .red-dialogue-option {
+          width: 100%;
+          text-align: left;
+          padding: 11px 14px;
+          background: linear-gradient(90deg, #7a1c18 0%, #4a110e 100%);
+          border: 1.5px solid #f2b441;
+          color: #fff5e4;
+          font-family: 'Cormorant Garamond', serif;
+          font-size: 16.5px;
+          font-weight: 700;
+          cursor: pointer;
+          box-shadow: 4px 4px 0px #060504;
+          transition: all 0.15s ease;
         }
-        .die-cube {
-          width: 24px;
-          height: 24px;
-          background: #f3ead8;
-          color: #141210;
-          font-weight: 900;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 3px;
-          border: 1px solid #111;
+        .red-dialogue-option:hover {
+          background: linear-gradient(90deg, #b82b24 0%, #7a1c18 100%);
+          transform: translateX(3px);
         }
       `,
         }}
       />
 
-      {/* ВЕРХНЯЯ ПАНЕЛЬ НАКОПИТЕЛЕЙ И ИМПОРТА */}
-      <header className="top-deck">
-        <div className="title-plaque">
-          <span className="rcm-stamp mono">РГМ // S.M.A.R.T.</span>
-          <div>
-            <h1 className="app-name">CrystalDisk // Elysium Edition</h1>
-          </div>
+      {/* ВЕРХНЯЯ ПАНЕЛЬ КАССЕТ ПАМЯТИ */}
+      <header className="martinaise-topbar">
+        <div className="brand-cluster">
+          <span className="insulindian-seal font-oswald">РГМ // СЕКТОР 41</span>
+          <h1 className="main-heading font-oswald">
+            CrystalDisk // Elysium
+          </h1>
         </div>
 
-        {/* Вкладки дисков (как в CrystalDiskInfo) */}
-        <div className="drive-tabs">
+        <div className="cassette-strip">
           {drives.map((drv, idx) => {
-            const dotClass =
+            const color =
               drv.healthStatus === "GOOD"
-                ? "dot-good"
+                ? "#68c7b7"
                 : drv.healthStatus === "CAUTION"
-                ? "dot-caution"
-                : "dot-bad";
+                ? "#f2a93b"
+                : "#ff4d5e";
             return (
               <button
                 key={drv.id}
                 onClick={() => handleSelectDrive(idx)}
-                className={`drive-tab ${idx === activeDriveIdx ? "active" : ""}`}
+                className={`cassette-tab ${idx === activeDriveIdx ? "active" : ""}`}
               >
-                <span className={`status-dot ${dotClass}`} />
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: "13px" }}>
+                <span
+                  style={{
+                    width: "12px",
+                    height: "12px",
+                    background: color,
+                    boxShadow: `0 0 10px ${color}`,
+                    transform: "rotate(45deg)",
+                    display: "inline-block",
+                  }}
+                />
+                <div style={{ textAlign: "left" }}>
+                  <div className="font-oswald" style={{ fontSize: "13px", color: "#fff5e4" }}>
                     [{drv.letter}] {drv.healthPercent}% • {drv.temperature} °C
                   </div>
-                  <div style={{ fontSize: "11px", color: "#9e8f79" }}>
-                    {drv.capacityGB} ГБ — {drv.name.slice(0, 22)}
+                  <div style={{ fontSize: "12px", color: "#b5a48b" }}>
+                    {drv.name}
                   </div>
                 </div>
               </button>
@@ -1647,261 +1594,293 @@ export default function CrystalDiskElysium() {
         </div>
 
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button onClick={() => setShowImportModal(true)} className="disco-btn">
-            + Вставить свой отчёт CDI / smartctl
+          <button onClick={() => setShowImportModal(true)} className="painterly-btn">
+            + Загрузить дамп своего диска
           </button>
           <button
             onClick={() => setRawFormat((p) => (p === "HEX16" ? "DEC10" : "HEX16"))}
-            className="disco-btn mono"
+            className="painterly-btn font-mono"
           >
-            RAW: {rawFormat === "HEX16" ? "16 [HEX]" : "10 [DEC]"}
+            {rawFormat === "HEX16" ? "RAW: 16 [HEX]" : "RAW: 10 [DEC]"}
+          </button>
+          <button onClick={toggleSound} className="painterly-btn">
+            {soundEnabled ? "🔊 Звук: ВКЛ" : "🔇 Звук: ВЫКЛ"}
           </button>
         </div>
       </header>
 
-      {/* ГЛАВНАЯ СЦЕНА: ПРИБОРНАЯ ДОСКА СЛЕВА + ЛЕНТА МЫСЛЕЙ СПРАВА */}
-      <div className="main-stage">
-        {/* ЛЕВАЯ ЧАСТЬ: CRYSTALDISKINFO В ЭСТЕТИКЕ РЕВАШОЛЯ */}
-        <main className="cdi-pane">
-          <div className="cdi-hero">
-            {/* 1. Экспрессионистский портрет с переключателем персонажа */}
-            <div className="portrait-frame">
-              <div className="portrait-box">
-                <DiscoPortrait persona={persona} health={effectiveHealth} temp={effectiveTemp} />
+      {/* ТРЁХКОЛОНОЧНАЯ СЦЕНА */}
+      <div className="stage-grid">
+        {/* 1. ЛЕВЫЙ СТОЛБ: ШКАЛЫ ЗДОРОВЬЯ/МОРАЛИ + ХОЛСТ МАСЛОМ + ТАРО-ИНДИКАТОРЫ */}
+        <aside className="left-hud">
+          {/* Каноничные шкалы Здоровья и Морали */}
+          <div className="vital-bars">
+            <div>
+              <div
+                className="font-oswald"
+                style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#ff756b", marginBottom: "3px" }}
+              >
+                <span>Здоровье кремния (TBW)</span>
+                <span className="font-mono">{activeDrive.healthPercent}%</span>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px" }}>
-                {[
-                  { id: "harry", label: "Гарри" },
-                  { id: "kim", label: "Ким" },
-                  { id: "radiocomputer", label: "Лампа" },
-                ].map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setPersona(p.id as PersonaId)}
-                    className="disco-btn"
-                    style={{
-                      padding: "4px 6px",
-                      fontSize: "11px",
-                      background: persona === p.id ? "#c85a32" : "#26211d",
-                      color: persona === p.id ? "#141210" : "#e6dcc8",
-                    }}
-                  >
-                    {p.label}
-                  </button>
+              <div className="pip-row">
+                {Array.from({ length: 10 }, (_, i) => (
+                  <div key={i} className={`pip-cell ${i < healthPips ? "pip-health-on" : ""}`} />
                 ))}
               </div>
             </div>
 
-            {/* 2. Два больших фирменных индикатора CrystalDiskInfo: Техсостояние и Температура */}
-            <div className="gauges-col">
+            <div>
               <div
-                className={`big-gauge ${
-                  effectiveHealth === "GOOD"
-                    ? "gauge-good"
-                    : effectiveHealth === "CAUTION"
-                    ? "gauge-caution"
-                    : "gauge-bad"
-                }`}
+                className="font-oswald"
+                style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#6ec1e4", marginBottom: "3px" }}
               >
-                <div className="gauge-label">Техсостояние носителя</div>
-                <div className="gauge-val">
-                  {effectiveHealth === "GOOD"
-                    ? "ХОРОШО"
-                    : effectiveHealth === "CAUTION"
-                    ? "ТРЕВОГА"
-                    : "СЕРОТА (КРИТ.)"}
-                </div>
-                <div className="mono" style={{ fontSize: "20px", fontWeight: 700, marginTop: "4px", color: "#f3ead8" }}>
-                  {activeDrive.healthPercent} %
-                </div>
+                <span>Мораль контроллера</span>
+                <span className="font-mono">{activeDrive.moralePercent}%</span>
               </div>
-
-              <div
-                className={`big-gauge ${
-                  effectiveTemp < 50
-                    ? "gauge-good"
-                    : effectiveTemp < 60
-                    ? "gauge-caution"
-                    : "gauge-bad"
-                }`}
-              >
-                <div className="gauge-label">Температура кристалла</div>
-                <div className="gauge-val mono">{effectiveTemp} °C</div>
-                <div style={{ width: "100%", marginTop: "8px" }}>
-                  <input
-                    type="range"
-                    min={-10}
-                    max={30}
-                    value={tempOffset}
-                    onChange={(e) => setTempOffset(Number(e.target.value))}
-                    title="Симуляция тепловой нагрузки на накопитель"
-                    style={{ width: "100%", accentColor: "#c85a32", cursor: "pointer" }}
-                  />
-                  <div style={{ fontSize: "10px", color: "#d8cbb8" }}>
-                    Регулятор нагрева ({tempOffset >= 0 ? `+${tempOffset}` : tempOffset} °C)
-                  </div>
-                </div>
+              <div className="pip-row">
+                {Array.from({ length: 10 }, (_, i) => (
+                  <div key={i} className={`pip-cell ${i < moralePips ? "pip-morale-on" : ""}`} />
+                ))}
               </div>
-            </div>
-
-            {/* 3. Паспортные данные накопителя (Firmware, Serial, Interface, TBW, Hours) */}
-            <div className="passport-box">
-              <div>
-                <div className="drive-title-banner">
-                  <div>
-                    <h2 style={{ margin: 0, fontSize: "20px", color: "#f4d35e", letterSpacing: "0.02em" }}>
-                      {activeDrive.model} ({activeDrive.capacityGB} ГБ)
-                    </h2>
-                    <p style={{ margin: "4px 0 0 0", fontSize: "12.5px", color: "#cbbba0", fontStyle: "italic" }}>
-                      «{activeDrive.introQuote}»
-                    </p>
-                  </div>
-                </div>
-
-                <div className="meta-grid">
-                  <div className="meta-row">
-                    <span className="meta-key">Прошивка (Firmware):</span>
-                    <span className="meta-val mono">{activeDrive.firmware}</span>
-                  </div>
-                  <div className="meta-row">
-                    <span className="meta-key">Всего хост-чтений:</span>
-                    <span className="meta-val mono">{activeDrive.totalReadsGB.toLocaleString("ru-RU")} ГБ</span>
-                  </div>
-                  <div className="meta-row">
-                    <span className="meta-key">Серийный номер:</span>
-                    <span className="meta-val mono">{activeDrive.serial}</span>
-                  </div>
-                  <div className="meta-row">
-                    <span className="meta-key">Всего хост-записей:</span>
-                    <span className="meta-val mono">{activeDrive.totalWritesGB.toLocaleString("ru-RU")} ГБ</span>
-                  </div>
-                  <div className="meta-row">
-                    <span className="meta-key">Интерфейс:</span>
-                    <span className="meta-val mono">{activeDrive.interfaceType}</span>
-                  </div>
-                  <div className="meta-row">
-                    <span className="meta-key">Число включений:</span>
-                    <span className="meta-val mono">{activeDrive.powerOnCount.toLocaleString("ru-RU")} раз</span>
-                  </div>
-                  <div className="meta-row">
-                    <span className="meta-key">Режим передачи:</span>
-                    <span className="meta-val mono">{activeDrive.transferMode}</span>
-                  </div>
-                  <div className="meta-row">
-                    <span className="meta-key">Общее время работы:</span>
-                    <span className="meta-val mono">
-                      {activeDrive.powerOnHours.toLocaleString("ru-RU")} ч ({Math.round(activeDrive.powerOnHours / 24)} дн.)
-                    </span>
-                  </div>
-                  <div className="meta-row">
-                    <span className="meta-key">Стандарт / Скорость:</span>
-                    <span className="meta-val mono">{activeDrive.rotationRate}</span>
-                  </div>
-                  <div className="meta-row">
-                    <span className="meta-key">Возможности:</span>
-                    <span className="meta-val mono">{activeDrive.features}</span>
-                  </div>
-                </div>
-              </div>
-
-              {browserStorage && (
-                <div
-                  style={{
-                    marginTop: "12px",
-                    padding: "7px 12px",
-                    background: "rgba(95, 168, 154, 0.12)",
-                    border: "1px solid #4a6b65",
-                    fontSize: "12px",
-                    color: "#a7d7c5",
-                    display: "flex",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span>Реальная телеметрия локального тома браузера:</span>
-                  <span className="mono">
-                    Выделено квоты: {browserStorage.quotaGB} ГБ (исп. {browserStorage.usedGB} ГБ)
-                  </span>
-                </div>
-              )}
             </div>
           </div>
 
-          {/* ТАБЛИЦА РЕГИСТРОВ S.M.A.R.T. */}
-          <div className="smart-panel">
-            <div className="smart-header">
-              <div>
-                <strong style={{ fontSize: "14px", letterSpacing: "0.04em", textTransform: "uppercase", color: "#f3ead8" }}>
-                  Телеметрия регистров S.M.A.R.T. (Нажмите на любую строку для допроса сектора)
-                </strong>
+          {/* Живописный холст маслом (<canvas>) */}
+          <div className="oil-frame">
+            <ImpastoOilPortrait artId={artPiece} health={effectiveHealth} temp={effectiveTemp} />
+            <div className="oil-caption font-oswald">
+              {artPiece === "tequila"
+                ? "Гарри «Текила Сансет»"
+                : artPiece === "interfacing"
+                ? "Навык: Интерфейс"
+                : artPiece === "inland"
+                ? "Внутренняя Империя"
+                : "Лейтенант Ким Кицураги"}
+            </div>
+          </div>
+
+          {/* Переключатель картин маслом */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+            {[
+              { id: "tequila", label: "Текила Сансет" },
+              { id: "interfacing", label: "Интерфейс" },
+              { id: "inland", label: "Империя" },
+              { id: "kim", label: "Ким Кицураги" },
+            ].map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setArtPiece(p.id as ArtPieceId)}
+                className="painterly-btn"
+                style={{
+                  padding: "5px 6px",
+                  fontSize: "11px",
+                  background: artPiece === p.id ? "#d95326" : "#241d17",
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Крупная печать Техсостояния */}
+          <div
+            className={`tarot-card ${
+              effectiveHealth === "GOOD"
+                ? "tarot-good"
+                : effectiveHealth === "CAUTION"
+                ? "tarot-caution"
+                : "tarot-bad"
+            }`}
+          >
+            <div className="font-oswald" style={{ fontSize: "11px", color: "#e8dec8", opacity: 0.8 }}>
+              Вердикт техсостояния
+            </div>
+            <div className="font-oswald" style={{ fontSize: "24px", fontWeight: 700, color: "#fff" }}>
+              {effectiveHealth === "GOOD"
+                ? "БЕЗУПРЕЧНО"
+                : effectiveHealth === "CAUTION"
+                ? "ТРЕВОГА (ИЗНОС)"
+                : "РАСПАД В СЕРОТУ"}
+            </div>
+            <div className="font-mono" style={{ fontSize: "18px", color: "#f2b441", fontWeight: 700 }}>
+              Ресурс: {activeDrive.healthPercent} %
+            </div>
+          </div>
+
+          {/* Крупная печать Температуры */}
+          <div
+            className={`tarot-card ${
+              effectiveTemp < 50 ? "tarot-good" : effectiveTemp < 60 ? "tarot-caution" : "tarot-bad"
+            }`}
+          >
+            <div className="font-oswald" style={{ fontSize: "11px", color: "#e8dec8", opacity: 0.8 }}>
+              Термодинамика корпуса
+            </div>
+            <div className="font-mono" style={{ fontSize: "26px", fontWeight: 700, color: "#fff" }}>
+              {effectiveTemp} °C
+            </div>
+            <input
+              type="range"
+              min={-10}
+              max={28}
+              value={tempOffset}
+              onChange={(e) => setTempOffset(Number(e.target.value))}
+              style={{ width: "100%", accentColor: "#d95326", marginTop: "6px", cursor: "pointer" }}
+            />
+            <div style={{ fontSize: "12px", color: "#d4b88c", fontStyle: "italic" }}>
+              Ползунок теплового стресса ({tempOffset >= 0 ? `+${tempOffset}` : tempOffset} °C)
+            </div>
+          </div>
+        </aside>
+
+        {/* 2. ЦЕНТРАЛЬНАЯ ЧАСТЬ: ПАСПОРТ НАКОПИТЕЛЯ + ТАБЛИЦА S.M.A.R.T. */}
+        <main className="center-dossier">
+          <div className="dossier-card">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", borderBottom: "2px solid #6e5536", paddingBottom: "8px" }}>
+              <h2 className="font-oswald" style={{ margin: 0, fontSize: "22px", color: "#f2b441" }}>
+                {activeDrive.model} ({activeDrive.capacityGB} ГБ)
+              </h2>
+              <span className="font-mono" style={{ fontSize: "12px", color: "#68c7b7" }}>
+                {activeDrive.isRealHardware ? "● РЕАЛЬНОЕ ОБОРУДОВАНИЕ ПК" : "● КАССЕТА ПРОТОКОЛА РГМ"}
+              </span>
+            </div>
+
+            <p style={{ margin: "10px 0 6px 0", fontSize: "17px", fontStyle: "italic", color: "#e8dec8" }}>
+              «{activeDrive.introQuote}»
+            </p>
+
+            <div className="passport-grid">
+              <div className="passport-line">
+                <span style={{ color: "#b5a48b" }}>Прошивка (Firmware):</span>
+                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.firmware}</span>
               </div>
-              <span style={{ fontSize: "12px", color: "#b5a48b" }}>
-                Активный регистр: <strong className="mono" style={{ color: "#f4d35e" }}>{selectedAttrId}h</strong>
+              <div className="passport-line">
+                <span style={{ color: "#b5a48b" }}>Хост-чтение (Всего):</span>
+                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.totalReadsGB.toLocaleString("ru-RU")} ГБ</span>
+              </div>
+              <div className="passport-line">
+                <span style={{ color: "#b5a48b" }}>Серийный номер:</span>
+                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.serial}</span>
+              </div>
+              <div className="passport-line">
+                <span style={{ color: "#b5a48b" }}>Хост-запись (Всего):</span>
+                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.totalWritesGB.toLocaleString("ru-RU")} ГБ</span>
+              </div>
+              <div className="passport-line">
+                <span style={{ color: "#b5a48b" }}>Шина / Интерфейс:</span>
+                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.interfaceType}</span>
+              </div>
+              <div className="passport-line">
+                <span style={{ color: "#b5a48b" }}>Циклов включения:</span>
+                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.powerOnCount.toLocaleString("ru-RU")} раз</span>
+              </div>
+              <div className="passport-line">
+                <span style={{ color: "#b5a48b" }}>Режим передачи:</span>
+                <span className="font-mono" style={{ fontWeight: 700 }}>{activeDrive.transferMode}</span>
+              </div>
+              <div className="passport-line">
+                <span style={{ color: "#b5a48b" }}>Часов под напряжением:</span>
+                <span className="font-mono" style={{ fontWeight: 700 }}>
+                  {activeDrive.powerOnHours.toLocaleString("ru-RU")} ч ({Math.round(activeDrive.powerOnHours / 24)} сут.)
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* ТАБЛИЦА АТРИБУТОВ S.M.A.R.T. */}
+          <div className="smart-table-wrap">
+            <div style={{ padding: "10px 16px", background: "#241c16", borderBottom: "1.5px solid #6e5536", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span className="font-oswald" style={{ fontSize: "14px", color: "#f5ebd6" }}>
+                Ведомость регистров самодиагностики S.M.A.R.T. (кликните по строке для допроса)
+              </span>
+              <span className="font-mono" style={{ fontSize: "12px", color: "#f2b441" }}>
+                Регистр: {selectedAttrId}h
               </span>
             </div>
 
             <div style={{ overflowX: "auto" }}>
-              <table className="smart-table">
+              <table className="disco-table">
                 <thead>
                   <tr>
-                    <th style={{ width: "44px" }}>Стат.</th>
-                    <th style={{ width: "54px" }}>ID</th>
-                    <th>Имя атрибута / Назначение регистра</th>
-                    <th style={{ textAlign: "right" }}>Текущее</th>
-                    <th style={{ textAlign: "right" }}>Худшее</th>
+                    <th style={{ width: "42px" }}>Печать</th>
+                    <th style={{ width: "50px" }}>ID</th>
+                    <th>Атрибут / Физический смысл регистра</th>
+                    <th style={{ width: "130px" }}>Запас прочности</th>
+                    <th style={{ textAlign: "right" }}>Тек.</th>
+                    <th style={{ textAlign: "right" }}>Худш.</th>
                     <th style={{ textAlign: "right" }}>Порог</th>
-                    <th style={{ textAlign: "right" }}>
-                      RAW-значения ({rawFormat === "HEX16" ? "HEX" : "DEC"})
-                    </th>
+                    <th style={{ textAlign: "right" }}>Счётчик RAW</th>
                   </tr>
                 </thead>
                 <tbody>
                   {activeDrive.attributes.map((attr) => {
-                    const dotClass =
+                    const color =
                       attr.status === "GOOD"
-                        ? "dot-good"
+                        ? "#68c7b7"
                         : attr.status === "CAUTION"
-                        ? "dot-caution"
-                        : "dot-bad";
-                    const isSel = selectedAttrId === attr.id;
+                        ? "#f2a93b"
+                        : "#ff4d5e";
+                    const pct = Math.min(100, Math.max(8, attr.current));
                     return (
                       <tr
                         key={attr.id}
                         onClick={() => handleInspectAttribute(attr)}
-                        className={isSel ? "selected-row" : ""}
+                        className={selectedAttrId === attr.id ? "active-attr" : ""}
                       >
                         <td style={{ textAlign: "center" }}>
-                          <span className={`status-dot ${dotClass}`} />
+                          <span
+                            style={{
+                              display: "inline-block",
+                              width: "11px",
+                              height: "11px",
+                              background: color,
+                              transform: "rotate(45deg)",
+                              boxShadow: `0 0 8px ${color}`,
+                            }}
+                          />
                         </td>
-                        <td className="mono" style={{ fontWeight: 700, color: "#d4a359" }}>
+                        <td className="font-mono" style={{ fontWeight: 700, color: "#f2b441" }}>
                           {attr.id}
                         </td>
                         <td>
-                          <div style={{ fontWeight: 700, color: "#f3ead8" }}>{attr.name}</div>
-                          <div style={{ fontSize: "11.5px", color: "#a89984" }}>{attr.ruName}</div>
+                          <div className="font-oswald" style={{ fontSize: "14px", color: "#fff5e4" }}>
+                            {attr.name}
+                          </div>
+                          <div style={{ fontSize: "14px", color: "#b5a48b", fontStyle: "italic" }}>
+                            {attr.ruName}
+                          </div>
                         </td>
-                        <td className="mono" style={{ textAlign: "right" }}>
+                        <td>
+                          <div style={{ height: "8px", background: "#120e0b", border: "1px solid #4a3a28" }}>
+                            <div
+                              style={{
+                                width: `${pct}%`,
+                                height: "100%",
+                                background: color,
+                              }}
+                            />
+                          </div>
+                        </td>
+                        <td className="font-mono" style={{ textAlign: "right", fontSize: "13px" }}>
                           {attr.current}
                         </td>
-                        <td className="mono" style={{ textAlign: "right", color: "#b5a48b" }}>
+                        <td className="font-mono" style={{ textAlign: "right", fontSize: "13px", color: "#a89984" }}>
                           {attr.worst}
                         </td>
-                        <td className="mono" style={{ textAlign: "right", color: "#9e8f79" }}>
+                        <td className="font-mono" style={{ textAlign: "right", fontSize: "13px", color: "#8c7b65" }}>
                           {attr.threshold}
                         </td>
                         <td
-                          className="mono"
+                          className="font-mono"
                           style={{
                             textAlign: "right",
+                            fontSize: "13px",
                             fontWeight: 700,
-                            color:
-                              attr.status === "BAD"
-                                ? "#f87171"
-                                : attr.status === "CAUTION"
-                                ? "#fbbf24"
-                                : "#a7f3d0",
+                            color,
                           }}
                         >
-                          {formatRawValue(attr.rawDec)}
+                          {formatRaw(attr.rawDec)}
                           {attr.unit && rawFormat === "DEC10" ? ` ${attr.unit}` : ""}
                         </td>
                       </tr>
@@ -1913,57 +1892,60 @@ export default function CrystalDiskElysium() {
           </div>
         </main>
 
-        {/* ПРАВАЯ КОЛОНКА: ИКОНИЧЕСКАЯ ЛЕНТА МЫСЛЕЙ DISCO ELYSIUM */}
-        <aside className="dialogue-column">
-          <div className="dialogue-header">
+        {/* 3. ПРАВЫЙ СТОЛБ: КАНОНИЧНАЯ ЛЕНТА ГОЛОСОВ DISCO ELYSIUM */}
+        <aside className="right-tape">
+          <div className="tape-header">
             <div>
-              <div style={{ fontSize: "13px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#f4d35e" }}>
+              <div className="font-oswald" style={{ fontSize: "14px", color: "#f2b441" }}>
                 Лента внутреннего диалога
               </div>
-              <div style={{ fontSize: "11px", color: "#9e8f79" }}>
-                Голоса навыков анализируют физику носителя
+              <div style={{ fontSize: "13px", color: "#a89984", fontStyle: "italic" }}>
+                Голоса навыков препарируют телеметрию диска
               </div>
             </div>
             <button
-              onClick={() => setDialogueLog((prev) => prev.slice(-1))}
-              className="disco-btn"
-              style={{ padding: "4px 9px", fontSize: "11px" }}
+              onClick={() => setDialogueLog((p) => p.slice(-1))}
+              className="painterly-btn"
+              style={{ padding: "4px 10px", fontSize: "11px" }}
             >
               Очистить
             </button>
           </div>
 
-          <div className="dialogue-scroll">
+          <div className="tape-scroll">
             {dialogueLog.map((entry) => (
               <div
                 key={entry.id}
-                className="thought-entry"
-                style={{ borderLeftColor: skillColor(entry.category) }}
+                className="dialogue-block"
+                style={{ borderLeftColor: getSkillColor(entry.category) }}
               >
                 <div>
-                  <span className="skill-title" style={{ color: skillColor(entry.category) }}>
+                  <span
+                    className="dialogue-actor"
+                    style={{ color: getSkillColor(entry.category) }}
+                  >
                     {entry.skill}
                   </span>
-                  {entry.difficulty && <span className="skill-diff">[{entry.difficulty}]</span>}
+                  {entry.difficulty && (
+                    <span className="dialogue-check-tag">[{entry.difficulty}]</span>
+                  )}
                 </div>
-                <div className="thought-text">— {entry.text}</div>
+                <div className="dialogue-prose">— {entry.text}</div>
               </div>
             ))}
-            <div ref={logEndRef} />
+            <div ref={logBottomRef} />
           </div>
 
-          {/* Нижний блок с Белой проверкой 2d6 */}
-          <div className="dialogue-footer">
-            <button onClick={handleRollSkillCheck} className="disco-btn disco-btn-check">
-              🎲 [ИНТЕРФЕЙС — Средне 8] Приложить ухо к корпусу и прощупать скрытые сектора
+          {/* Нижняя панель выбора реплики и Белой проверки 2d6 */}
+          <div className="red-choice-box">
+            <button onClick={handleRollWhiteCheck} className="red-dialogue-option">
+              1. 🎲 [ИНТЕРФЕЙС — Средне 8] Приложить ладонь к корпусу [{activeDrive.letter}] и прослушать биение секторов.
             </button>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11.5px", color: "#a89984" }}>
-              <span>Шанс успеха зависит от здоровья диска</span>
-              {lastDiceRoll && (
-                <span className="dice-box mono">
-                  <span>Бросок:</span>
-                  <span className="die-cube">{lastDiceRoll[0]}</span>
-                  <span className="die-cube">{lastDiceRoll[1]}</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: "#b5a48b" }}>
+              <span>Модификатор зависит от здоровья носителя</span>
+              {lastDice && (
+                <span className="font-mono" style={{ color: "#f2b441", fontWeight: 700 }}>
+                  Кости: [{lastDice[0]}] [{lastDice[1]}]
                 </span>
               )}
             </div>
@@ -1971,13 +1953,13 @@ export default function CrystalDiskElysium() {
         </aside>
       </div>
 
-      {/* МОДАЛЬНОЕ ОКНО ИМПОРТА НАСТОЯЩЕГО ОТЧЁТА CRYSTALDISKINFO */}
+      {/* МОДАЛЬНОЕ ОКНО ИМПОРТА НАСТОЯЩЕГО ОТЧЁТА С ВАШЕГО ПК */}
       {showImportModal && (
         <div
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.78)",
+            background: "rgba(0,0,0,0.82)",
             zIndex: 60,
             display: "flex",
             alignItems: "center",
@@ -1988,43 +1970,43 @@ export default function CrystalDiskElysium() {
           <div
             style={{
               width: "100%",
-              maxWidth: "660px",
-              background: "#1b1815",
-              border: "2px solid #c2a370",
-              padding: "22px",
-              boxShadow: "0 18px 50px rgba(0,0,0,0.85)",
+              maxWidth: "680px",
+              background: "#1a1511",
+              border: "2px solid #d99326",
+              boxShadow: "10px 10px 0px #000",
+              padding: "24px",
             }}
           >
-            <h3 style={{ margin: "0 0 8px 0", color: "#f4d35e", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Вставка реального дампа CrystalDiskInfo (`Правка → Копировать`)
+            <h3 className="font-oswald" style={{ margin: "0 0 8px 0", fontSize: "18px", color: "#f2b441" }}>
+              Загрузка реальной перфоленты S.M.A.R.T. с вашего ПК
             </h3>
-            <p style={{ margin: "0 0 12px 0", fontSize: "13px", color: "#cbbba0" }}>
-              Откройте обычный CrystalDiskInfo у себя на ПК, нажмите `Ctrl + C` (это копирует весь текстовый отчёт со всеми регистрами S.M.A.R.T.) и вставьте его в поле ниже:
+            <p style={{ margin: "0 0 12px 0", fontSize: "15px", color: "#e8dec8" }}>
+              Чтобы загрузить данные своего диска прямо в браузере, откройте обычный CrystalDiskInfo, нажмите `Ctrl + C` (или выполните в терминале `smartctl -a /dev/nvme0`) и вставьте текст ниже:
             </p>
             <textarea
-              rows={10}
+              rows={9}
               value={importText}
               onChange={(e) => setImportText(e.target.value)}
               placeholder={
                 "Model : Samsung SSD 980 1TB\nFirmware : 3B4QFXO7\nTemperature : 39 C\nHealth Status : Good (99 %)\n01 100 100 0 000000000000 Raw Read Error Rate\n05 100 100 10 000000000002 Reallocated Sectors Count"
               }
-              className="mono"
+              className="font-mono"
               style={{
                 width: "100%",
-                background: "#110f0d",
-                border: "1px solid #6e5a3e",
-                color: "#f3ead8",
+                background: "#0d0b09",
+                border: "1px solid #6e5536",
+                color: "#f5ebd6",
                 padding: "10px",
-                fontSize: "12px",
+                fontSize: "12.5px",
                 marginBottom: "14px",
               }}
             />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-              <button onClick={() => setShowImportModal(false)} className="disco-btn">
+              <button onClick={() => setShowImportModal(false)} className="painterly-btn">
                 Отмена
               </button>
-              <button onClick={handleImportSubmit} className="disco-btn disco-btn-check">
-                Распознать перфоленту S.M.A.R.T.
+              <button onClick={handleImportSubmit} className="painterly-btn">
+                Считать перфоленту
               </button>
             </div>
           </div>
