@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from "react";
 // ============================================================================
 
 type HealthState = "GOOD" | "CAUTION" | "BAD";
+type CanvasThemeId = "mind_burst" | "church_lasers" | "dolores_pieta" | "cousteau_grin";
 
 interface SmartAttribute {
   id: string;
@@ -60,16 +61,18 @@ interface DialogueMessage {
 interface ArtworkSlot {
   id: string;
   title: string;
-  repoPath: string;
+  theme: CanvasThemeId;
+  accentColor: string;
+  ambientGlow: string;
   customDataUrl: string | null;
 }
 
 // ============================================================================
-// 2. ХРАНИЛИЩЕ INDEXEDDB ДЛЯ СОХРАНЕНИЯ КАРТИНОК В БРАУЗЕРЕ
+// 2. INDEXEDDB ДЛЯ СОХРАНЕНИЯ ПОЛЬЗОВАТЕЛЬСКИХ ИЛЛЮСТРАЦИЙ (CTRL+V / DROP)
 // ============================================================================
 
-const DB_NAME = "DiscoCdiArtworksDB";
-const STORE_NAME = "slots";
+const DB_NAME = "DiscoCdiPanoramaDB";
+const STORE_NAME = "artworks";
 
 function openArtDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -145,8 +148,8 @@ class ElysiumAudio {
       const osc = this.ctx.createOscillator();
       const g = this.ctx.createGain();
       osc.type = "triangle";
-      osc.frequency.setValueAtTime(310, t);
-      osc.frequency.exponentialRampToValueAtTime(60, t + 0.032);
+      osc.frequency.setValueAtTime(320, t);
+      osc.frequency.exponentialRampToValueAtTime(65, t + 0.032);
       g.gain.setValueAtTime(0.06, t);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.032);
       osc.connect(g);
@@ -184,7 +187,849 @@ class ElysiumAudio {
 const soundFX = new ElysiumAudio();
 
 // ============================================================================
-// 4. ПРОФИЛИ НАКОПИТЕЛЕЙ И РЕПЛИКИ НАВЫКОВ DISCO ELYSIUM
+// 4. ЧЕТЫРЕ ПОЛНОЭКРАННЫЕ ПАНОРАМНЫЕ ИЛЛЮСТРАЦИИ (1260x800, ТУШЬ + ГУАШЬ/МАСЛО)
+// Персонаж слева [0..390], художественный задник справа [390..1260] под таблицей
+// ============================================================================
+
+function PanoramicMasterpieceArtwork({
+  theme,
+  customUrl,
+}: {
+  theme: CanvasThemeId;
+  customUrl: string | null;
+}) {
+  if (customUrl) {
+    return (
+      <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+        {/* Панорамный атмосферный задник на всё окно под правую стеклянную часть */}
+        <img
+          src={customUrl}
+          alt=""
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            filter: "blur(24px) saturate(1.4) brightness(0.38)",
+            transform: "scale(1.08)",
+          }}
+        />
+        {/* Чёткая иллюстрация в левой витрине */}
+        <img
+          src={customUrl}
+          alt="Custom Artwork"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: "390px",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: "center top",
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <svg
+      viewBox="0 0 1260 800"
+      preserveAspectRatio="xMidYMid slice"
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        display: "block",
+        pointerEvents: "none",
+      }}
+    >
+      <defs>
+        {/* Фильтр живого масляного мазка для фоновых вспышек и облаков */}
+        <filter id="oil-impasto" x="-10%" y="-10%" width="120%" height="120%">
+          <feTurbulence
+            type="fractalNoise"
+            baseFrequency="0.025 0.05"
+            numOctaves="3"
+            seed="14"
+            result="noise"
+          />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="noise"
+            scale="8"
+            xChannelSelector="R"
+            yChannelSelector="G"
+          />
+        </filter>
+
+        {/* Мягкое неоновое свечение для лазеров, лёгких и протуберанцев памяти */}
+        <filter id="neon-bloom" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="7" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+
+        {/* Текстура старого холста и кракелюра поверх всей картины */}
+        <pattern id="canvas-weave" width="6" height="6" patternUnits="userSpaceOnUse">
+          <path
+            d="M 0 3 L 6 3 M 3 0 L 3 6"
+            stroke="rgba(255, 245, 228, 0.028)"
+            strokeWidth="1"
+          />
+        </pattern>
+      </defs>
+
+      {/* ==================================================================== */}
+      {/* ХОЛСТ I: ПСИХОДЕЛИЧЕСКИЙ ШТОРМ СОЗНАНИЯ (B' B'' B''')                 */}
+      {/* ==================================================================== */}
+      {theme === "mind_burst" && (
+        <g>
+          <defs>
+            <radialGradient id="mb-bg" cx="22%" cy="38%" r="85%">
+              <stop offset="0%" stopColor="#3b0d45" />
+              <stop offset="32%" stopColor="#190a29" />
+              <stop offset="70%" stopColor="#0b0714" />
+              <stop offset="100%" stopColor="#06040a" />
+            </radialGradient>
+            <radialGradient id="mb-core" cx="20%" cy="38%" r="45%">
+              <stop offset="0%" stopColor="#fff3b0" stopOpacity="0.95" />
+              <stop offset="22%" stopColor="#ff5400" stopOpacity="0.82" />
+              <stop offset="50%" stopColor="#ff007f" stopOpacity="0.48" />
+              <stop offset="100%" stopColor="#7209b7" stopOpacity="0" />
+            </radialGradient>
+            <linearGradient id="mb-face-light" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#ffd6e0" />
+              <stop offset="40%" stopColor="#f27a94" />
+              <stop offset="78%" stopColor="#8a2be2" />
+              <stop offset="100%" stopColor="#3c096c" />
+            </linearGradient>
+          </defs>
+
+          {/* 1. Глубокий индиго-фиолетовый задник на все 1260px */}
+          <rect width="1260" height="800" fill="url(#mb-bg)" />
+
+          {/* Архитектурная сетка изолятора Сероты и осциллограммы на заднике справа под таблицей */}
+          <g stroke="rgba(186, 230, 253, 0.06)" strokeWidth="1" fill="none">
+            <circle cx="820" cy="400" r="180" strokeDasharray="6 8" />
+            <circle cx="820" cy="400" r="310" strokeDasharray="12 10" />
+            <circle cx="820" cy="400" r="460" />
+            <path d="M 390 140 L 1260 140 M 390 320 L 1260 320 M 390 520 L 1260 520 M 390 680 L 1260 680" />
+            <path d="M 520 0 L 440 800 M 740 0 L 660 800 M 960 0 L 880 800 M 1180 0 L 1100 800" />
+          </g>
+
+          {/* 2. Ядро психоделического взрыва из виска Гарри */}
+          <rect width="1260" height="800" fill="url(#mb-core)" />
+
+          {/* Экспрессионистский веер острых живописных мазков, летящих из виска (215, 315) через левый и правый холст */}
+          <g filter="url(#oil-impasto)" opacity="0.92">
+            {/* Дальние широкие лучи, заходящие на задник под таблицу S.M.A.R.T. */}
+            <polygon points="215,315 0,0 140,0" fill="#7209b7" opacity="0.7" />
+            <polygon points="215,315 110,0 290,0" fill="#ff007f" opacity="0.75" />
+            <polygon points="215,315 260,0 480,0" fill="#ff5400" opacity="0.65" />
+            <polygon points="215,315 440,0 760,0" fill="#ffbe0b" opacity="0.32" />
+            <polygon points="215,315 680,0 1120,0" fill="#00f5d4" opacity="0.18" />
+            <polygon points="215,315 0,40 0,210" fill="#3a86ff" opacity="0.72" />
+            <polygon points="215,315 0,180 0,360" fill="#ffbe0b" opacity="0.82" />
+            <polygon points="215,315 0,320 0,490" fill="#ff007f" opacity="0.75" />
+
+            {/* Острые графичные клинья кадмия, фуксии, циана и золота */}
+            <polygon points="215,315 -20,10 45,-10" fill="#00f5d4" />
+            <polygon points="215,315 35,-10 115,-10" fill="#ff0a6c" />
+            <polygon points="215,315 95,-10 175,-10" fill="#ffbe0b" />
+            <polygon points="215,315 155,-10 235,-10" fill="#ff4800" />
+            <polygon points="215,315 215,-10 310,-10" fill="#f72585" />
+            <polygon points="215,315 -20,85 -20,165" fill="#ff007f" />
+            <polygon points="215,315 -20,150 -20,235" fill="#ffbe0b" />
+            <polygon points="215,315 -20,220 -20,305" fill="#7209b7" />
+            <polygon points="215,315 -20,295 -20,375" fill="#ff4800" />
+            <polygon points="215,315 45,95 92,45" fill="#fff3b0" />
+            <polygon points="215,315 110,65 162,25" fill="#fff3b0" />
+            <polygon points="215,315 25,195 65,140" fill="#00f5d4" />
+          </g>
+
+          {/* 3. Меловые траектории и производные B', B'', B''' через весь задник */}
+          <g fill="none" stroke="rgba(186, 230, 253, 0.45)" strokeWidth="2">
+            <path d="M 218 302 Q 340 120 680 35" />
+            <path d="M 225 310 Q 410 165 920 65" />
+            <path d="M 232 320 Q 490 230 1190 135" />
+            <path d="M 235 330 Q 560 340 1240 290" strokeDasharray="8 6" opacity="0.4" />
+          </g>
+          <g
+            fontFamily="Georgia, 'Times New Roman', serif"
+            fontStyle="italic"
+            fontWeight="bold"
+            fill="rgba(224, 242, 254, 0.82)"
+          >
+            <text x="278" y="138" fontSize="26">
+              B&apos;
+            </text>
+            <text x="348" y="76" fontSize="22">
+              B&apos;&apos;
+            </text>
+            <text x="332" y="192" fontSize="19">
+              B&apos;&apos;&apos;
+            </text>
+            {/* Формулы и графики на заднике справа под стеклянной таблицей */}
+            <text x="530" y="96" fontSize="18" fill="rgba(186, 230, 253, 0.22)">
+              ∂²B / ∂t² + γ(∂B / ∂t) + ω₀²B = Λ(Pale)
+            </text>
+            <text x="780" y="218" fontSize="16" fill="rgba(255, 0, 127, 0.24)">
+              0x004F1A // MEMORY FRAGMENTATION SECTOR 41
+            </text>
+          </g>
+
+          {/* 4. ДЕТАЛЬНАЯ ИЛЛЮСТРАЦИЯ ГАРРИ С ЗАПРОКИНУТОЙ ГОЛОВОЙ И ПАЛЬЦАМИ У ВИСКА */}
+          <g>
+            {/* Тёмная масса развевающихся волос позади головы */}
+            <path
+              d="M 215 248 C 268 238, 318 268, 336 335 C 348 382, 335 445, 302 475 L 220 435 Z"
+              fill="#11071a"
+              stroke="#07030c"
+              strokeWidth="2.5"
+            />
+            {/* Пряди волос */}
+            <path
+              d="M 252 255 Q 305 285 316 365 M 272 268 Q 322 308 325 395"
+              stroke="#3c1654"
+              strokeWidth="3.5"
+              fill="none"
+            />
+
+            {/* Плечи и тёмный пиджак в фиолетово-пурпурном контровом свете */}
+            <path
+              d="M 12 800 L 46 535 Q 98 468 152 448 L 292 465 Q 355 495 398 800 Z"
+              fill="#160a24"
+              stroke="#09040f"
+              strokeWidth="3"
+            />
+            {/* Освещённый розовый левый лацкан пиджака */}
+            <path
+              d="M 75 538 L 148 448 L 172 498 L 148 665 L 88 620 Z"
+              fill="#591d66"
+              stroke="#240b30"
+              strokeWidth="2"
+            />
+            {/* Острый белый воротник рубашки с розовым рефлексом */}
+            <polygon
+              points="148,445 136,528 172,496 164,452"
+              fill="#e598b8"
+              stroke="#240b30"
+              strokeWidth="2"
+            />
+
+            {/* Шея с рельефом гортани и грудино-ключичной мышцы */}
+            <path
+              d="M 154 378 L 254 395 L 246 512 L 148 462 Z"
+              fill="#4d1954"
+              stroke="#1b0824"
+              strokeWidth="2.5"
+            />
+            {/* Яркий кораллово-розовый блик на гортани */}
+            <path d="M 156 382 L 196 408 L 182 482 L 154 456 Z" fill="#f78ca2" />
+
+            {/* Скульптурная основа запрокинутой головы */}
+            <path
+              d="M 152 342 C 158 296, 186 264, 214 262 C 248 260, 282 282, 286 338 C 288 382, 265 415, 222 418 C 178 412, 150 378, 152 342 Z"
+              fill="url(#mb-face-light)"
+              stroke="#1f0826"
+              strokeWidth="2.8"
+            />
+
+            {/* Плоскости света на лбу, скулах и щеке */}
+            <polygon points="188,268 238,266 246,294 192,290" fill="#ffe5ec" />
+            <polygon points="222,324 258,332 246,368 216,352" fill="#ffb3c6" />
+            {/* Складки на запрокинутом лбу */}
+            <path
+              d="M 192 275 Q 218 270 245 282 M 188 284 Q 215 279 242 290"
+              stroke="#7a2058"
+              strokeWidth="2"
+              fill="none"
+            />
+
+            {/* Левая и правая глазницы с закатившимися светящимися глазами */}
+            <path d="M 168 308 Q 186 296 204 308 Q 186 320 168 308 Z" fill="#47123e" />
+            <ellipse
+              cx="187"
+              cy="309"
+              rx="10"
+              ry="4.8"
+              transform="rotate(-12 187 309)"
+              fill="#fff0f3"
+            />
+            <path d="M 226 316 Q 246 306 264 322 Q 245 332 226 316 Z" fill="#380d33" />
+            <ellipse
+              cx="244"
+              cy="320"
+              rx="11"
+              ry="5.2"
+              transform="rotate(12 244 320)"
+              fill="#ffd6e0"
+            />
+
+            {/* Густые изломанные брови */}
+            <path
+              d="M 168 299 Q 186 289 205 300 M 225 304 Q 248 297 268 315"
+              stroke="#1f0824"
+              strokeWidth="5"
+              strokeLinecap="round"
+              fill="none"
+            />
+
+            {/* Анатомический нос в ракурсе снизу (спинка, кончик, крылья и тёмные ноздри) */}
+            <polygon
+              points="212,296 192,328 202,344 232,342 224,304"
+              fill="#ffcad4"
+              stroke="#591842"
+              strokeWidth="2"
+            />
+            <polygon points="194,328 202,344 232,342 220,328" fill="#802356" />
+            <ellipse cx="202" cy="336" rx="5" ry="3.2" fill="#1f071e" />
+            <ellipse cx="218" cy="337" rx="5.5" ry="3.5" fill="#1f071e" />
+
+            {/* Густые усы и бакенбарды Кусто */}
+            <path
+              d="M 150 356 Q 178 335 208 342 Q 244 348 268 384 L 284 352 L 278 424 Q 248 426 230 398 Q 204 368 176 388 L 154 394 Z"
+              fill="#240b2b"
+              stroke="#0f0414"
+              strokeWidth="2.5"
+            />
+            {/* Приоткрытый рот под усами */}
+            <ellipse cx="204" cy="367" rx="15" ry="6.5" fill="#140417" />
+            <path d="M 191 372 Q 204 379 217 372" stroke="#b54878" strokeWidth="3.5" fill="none" />
+
+            {/* Кисть руки с двумя пальцами, приставленными к виску */}
+            <path
+              d="M 274 332 L 336 356 L 368 394 L 382 364 L 395 372 L 378 436 L 322 456 L 296 384 L 274 348 Z"
+              fill="#6e2263"
+              stroke="#1d0724"
+              strokeWidth="2.5"
+            />
+            {/* Световые грани на фалангах пальцев */}
+            <path
+              d="M 278 336 L 334 360 M 282 349 L 328 373"
+              stroke="#f28cb1"
+              strokeWidth="3"
+              strokeLinecap="round"
+            />
+            {/* Манжета рубашки на правом запястье */}
+            <polygon
+              points="320,452 380,432 386,448 325,468"
+              fill="#9d6b99"
+              stroke="#1d0724"
+              strokeWidth="2"
+            />
+          </g>
+        </g>
+      )}
+
+      {/* ==================================================================== */}
+      {/* ХОЛСТ II: ХАРДКОР В ЦЕРКВИ // КИМ, ВИТРАЖ ДОЛОРЕС И ЛАЗЕРЫ           */}
+      {/* ==================================================================== */}
+      {theme === "church_lasers" && (
+        <g>
+          <defs>
+            <linearGradient id="cl-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#162430" />
+              <stop offset="45%" stopColor="#241c14" />
+              <stop offset="100%" stopColor="#0e1318" />
+            </linearGradient>
+            <radialGradient id="cl-vitrage" cx="28%" cy="24%" r="48%">
+              <stop offset="0%" stopColor="#fff3b0" stopOpacity="0.96" />
+              <stop offset="38%" stopColor="#eab308" stopOpacity="0.68" />
+              <stop offset="75%" stopColor="#9a5b13" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="#162430" stopOpacity="0" />
+            </radialGradient>
+          </defs>
+
+          {/* 1. Фон деревянных сводов церкви на сваях на все 1260px */}
+          <rect width="1260" height="800" fill="url(#cl-bg)" />
+          <rect width="1260" height="800" fill="url(#cl-vitrage)" />
+
+          {/* Деревянные стропила, колонны и ступени церкви через весь задник справа под таблицей */}
+          <g stroke="#0d1116" strokeWidth="14" opacity="0.75">
+            <line x1="120" y1="0" x2="-40" y2="800" />
+            <line x1="440" y1="0" x2="590" y2="800" />
+            <line x1="760" y1="0" x2="620" y2="800" />
+            <line x1="1080" y1="0" x2="940" y2="800" />
+          </g>
+          {/* Горизонтальные ступени церковного помоста внизу на всю ширину */}
+          <g stroke="#d4a359" strokeWidth="2" opacity="0.28">
+            <line x1="0" y1="650" x2="1260" y2="610" />
+            <line x1="0" y1="685" x2="1260" y2="645" />
+            <line x1="0" y1="720" x2="1260" y2="680" />
+            <line x1="0" y1="755" x2="1260" y2="715" />
+          </g>
+
+          {/* 2. Золотой витраж Долорес Дей со светящимися лёгкими вверху (x: 190..460) */}
+          <g opacity="0.92">
+            <polygon
+              points="180,0 440,0 520,480 140,480"
+              fill="rgba(212, 163, 89, 0.24)"
+              stroke="#8c6d3b"
+              strokeWidth="3"
+            />
+            {/* Силуэт и одеяние Долорес Дей в витраже */}
+            <path
+              d="M 265 135 L 365 135 L 395 420 L 235 420 Z"
+              fill="#6e5227"
+              stroke="#2b2010"
+              strokeWidth="2.5"
+            />
+            <circle cx="315" cy="78" r="28" fill="#dfb46b" stroke="#2b2010" strokeWidth="2.5" />
+            {/* Два ярко светящихся золотых лёгких в груди Долорес */}
+            <ellipse
+              cx="296"
+              cy="178"
+              rx="17"
+              ry="28"
+              transform="rotate(10 296 178)"
+              fill="#fff8bd"
+              filter="url(#neon-bloom)"
+            />
+            <ellipse
+              cx="334"
+              cy="178"
+              rx="17"
+              ry="28"
+              transform="rotate(-10 334 178)"
+              fill="#fff8bd"
+              filter="url(#neon-bloom)"
+            />
+          </g>
+
+          {/* 3. Силуэты танцующих под куполом на заднике справа (под таблицей S.M.A.R.T.) */}
+          <g opacity="0.35" fill="#18222c" stroke="#eab308" strokeWidth="1.5">
+            {/* Танцующий рейвер / Андре */}
+            <path d="M 620 490 L 740 430 L 790 540 L 750 710 L 660 710 Z" />
+            <circle cx="715" cy="405" r="22" />
+          </g>
+
+          {/* 4. ДЕТАЛЬНАЯ ФИГУРА КИМА КИЦУРАГИ НА ПЕРЕДНЕМ ПЛАНЕ СЛЕВА */}
+          <g>
+            {/* Тёмные брюки карго со складками */}
+            <path
+              d="M 68 425 L 210 420 L 238 795 L 165 795 L 145 585 L 125 795 L 72 795 Z"
+              fill="#14181f"
+              stroke="#080a0d"
+              strokeWidth="3"
+            />
+
+            {/* Ярко-оранжевый бомбер Кима с графичными складками тушью */}
+            <path
+              d="M 38 242 L 92 205 L 188 198 L 235 318 L 195 435 L 55 425 Z"
+              fill="#e85d1a"
+              stroke="#120d0a"
+              strokeWidth="3"
+            />
+            {/* Теневые плоскости на бомбере */}
+            <polygon points="122,225 215,288 188,425 110,365" fill="#a83808" />
+            {/* Чёрный отложной воротник бомбера и белая футболка */}
+            <polygon points="84,195 148,195 156,255 76,255" fill="#1a1918" />
+            <polygon points="96,225 138,225 152,375 102,375" fill="#d8e2dc" />
+            {/* Белая круглая эмблема РГМ на груди куртки */}
+            <circle
+              cx="162"
+              cy="275"
+              r="13"
+              fill="#2b3842"
+              stroke="#e0f2fe"
+              strokeWidth="2.5"
+            />
+            {/* Оранжевые перчатки Кима */}
+            <polygon
+              points="115,365 152,375 142,445 102,435"
+              fill="#d94e14"
+              stroke="#120d0a"
+              strokeWidth="2.5"
+            />
+            <polygon
+              points="22,385 56,392 48,458 14,445"
+              fill="#d94e14"
+              stroke="#120d0a"
+              strokeWidth="2.5"
+            />
+
+            {/* Голова Кима, причёска и культовые круглые очки */}
+            <path
+              d="M 78 142 L 136 138 L 142 208 L 114 232 L 82 214 Z"
+              fill="#d4966a"
+              stroke="#120d0a"
+              strokeWidth="2.8"
+            />
+            {/* Чёрные аккуратно зачёсанные волосы */}
+            <path
+              d="M 74 156 Q 104 114 142 142 L 136 162 L 78 164 Z"
+              fill="#141416"
+              stroke="#000"
+              strokeWidth="2"
+            />
+            {/* Круглые очки Кима с ярким голубым лазерным бликом */}
+            <circle
+              cx="96"
+              cy="182"
+              r="11"
+              fill="#bae6fd"
+              stroke="#111"
+              strokeWidth="2.8"
+            />
+            <circle
+              cx="122"
+              cy="178"
+              r="11"
+              fill="#bae6fd"
+              stroke="#111"
+              strokeWidth="2.8"
+            />
+            <line x1="107" y1="180" x2="111" y2="179" stroke="#111" strokeWidth="2.8" />
+            {/* Тонкие усы и сдержанная линия рта */}
+            <path d="M 98 206 L 122 204" stroke="#181512" strokeWidth="3" />
+          </g>
+
+          {/* 5. ПРОНЗИТЕЛЬНЫЕ ГОЛУБЫЕ ЛАЗЕРНЫЕ ЛУЧИ ЧЕРЕЗ ВЕСЬ ЭКРАН (И ПОД ТАБЛИЦЕЙ!) */}
+          <g filter="url(#neon-bloom)">
+            <line
+              x1="0"
+              y1="95"
+              x2="1260"
+              y2="465"
+              stroke="#00e5ff"
+              strokeWidth="12"
+              opacity="0.65"
+            />
+            <line x1="0" y1="95" x2="1260" y2="465" stroke="#e0faff" strokeWidth="3.5" />
+
+            <line
+              x1="90"
+              y1="0"
+              x2="1260"
+              y2="690"
+              stroke="#00e5ff"
+              strokeWidth="8"
+              opacity="0.55"
+            />
+            <line x1="90" y1="0" x2="1260" y2="690" stroke="#e0faff" strokeWidth="2.5" />
+
+            <line
+              x1="340"
+              y1="0"
+              x2="0"
+              y2="440"
+              stroke="#00e5ff"
+              strokeWidth="7"
+              opacity="0.6"
+            />
+            <line x1="340" y1="0" x2="0" y2="440" stroke="#e0faff" strokeWidth="2" />
+
+            <line
+              x1="0"
+              y1="620"
+              x2="1260"
+              y2="210"
+              stroke="#00e5ff"
+              strokeWidth="10"
+              opacity="0.5"
+            />
+            <line x1="0" y1="620" x2="1260" y2="210" stroke="#e0faff" strokeWidth="3" />
+          </g>
+        </g>
+      )}
+
+      {/* ==================================================================== */}
+      {/* ХОЛСТ III: ПЬЕТА ИНСУЛИНДИИ // СВЕТЯЩИЕСЯ ЛЁГКИЕ ДОЛОРЕС ДЕЙ         */}
+      {/* ==================================================================== */}
+      {theme === "dolores_pieta" && (
+        <g>
+          <defs>
+            <radialGradient id="dp-bg" cx="24%" cy="26%" r="82%">
+              <stop offset="0%" stopColor="#6e2b1c" />
+              <stop offset="35%" stopColor="#1e293b" />
+              <stop offset="72%" stopColor="#0f1420" />
+              <stop offset="100%" stopColor="#06080e" />
+            </radialGradient>
+            <radialGradient id="dp-lungs-glow" cx="20%" cy="24%" r="36%">
+              <stop offset="0%" stopColor="#fffbeb" stopOpacity="0.98" />
+              <stop offset="28%" stopColor="#f59e0b" stopOpacity="0.72" />
+              <stop offset="65%" stopColor="#b91c1c" stopOpacity="0.28" />
+              <stop offset="100%" stopColor="#0f1420" stopOpacity="0" />
+            </radialGradient>
+            <linearGradient id="dp-body-grad" x1="0%" y1="0%" x2="80%" y2="100%">
+              <stop offset="0%" stopColor="#fef3c7" />
+              <stop offset="28%" stopColor="#d6a889" />
+              <stop offset="58%" stopColor="#3b5978" />
+              <stop offset="100%" stopColor="#0f1e36" />
+            </linearGradient>
+          </defs>
+
+          {/* 1. Глубокий живописный задник с берлинской лазурью и кармином на все 1260px */}
+          <rect width="1260" height="800" fill="url(#dp-bg)" />
+
+          {/* Живописные масляные облака на заднике справа под таблицей S.M.A.R.T. */}
+          <g filter="url(#oil-impasto)" opacity="0.45">
+            <ellipse cx="620" cy="180" rx="260" ry="120" fill="#7f1d1d" />
+            <ellipse cx="940" cy="340" rx="310" ry="160" fill="#1e3a5f" />
+            <ellipse cx="740" cy="580" rx="280" ry="140" fill="#78350f" />
+          </g>
+
+          {/* Золотое зарево от лёгких Долорес Дей */}
+          <rect width="1260" height="800" fill="url(#dp-lungs-glow)" />
+
+          {/* 2. Багрово-красные потёки масляной краски вдоль левого края (x: 10..135) */}
+          <g filter="url(#oil-impasto)" opacity="0.88">
+            <rect x="14" y="290" width="95" height="510" fill="#7f1d1d" />
+            <rect x="28" y="340" width="14" height="440" fill="#dc2626" />
+            <rect x="52" y="310" width="18" height="470" fill="#ef4444" />
+            <rect x="82" y="360" width="12" height="420" fill="#b91c1c" />
+            <rect x="104" y="390" width="10" height="390" fill="#dc2626" />
+          </g>
+
+          {/* 3. СКЛОНЁННЫЙ ЛИК ДОЛОРЕС ДЕЙ И СВЕЧЕНИЕ БРОНХИАЛЬНОГО ДЕРЕВА */}
+          <g>
+            {/* Плечи и вуаль Долорес */}
+            <path
+              d="M 115 95 Q 235 45 345 110 L 385 350 L 95 320 Z"
+              fill="rgba(120, 53, 38, 0.65)"
+              stroke="#451a14"
+              strokeWidth="2"
+            />
+            {/* Лик Долорес в мягком золотом свете */}
+            <path
+              d="M 215 18 Q 258 12 282 42 Q 288 85 248 106 Q 210 98 205 55 Z"
+              fill="#e6b891"
+              stroke="#5c2c1d"
+              strokeWidth="2"
+            />
+            {/* Опущенные ресницы и спокойная полуулыбка */}
+            <path
+              d="M 222 54 Q 234 62 246 56 M 258 60 Q 268 66 276 60 M 232 84 Q 246 90 258 84"
+              stroke="#4a2216"
+              strokeWidth="2.2"
+              fill="none"
+            />
+
+            {/* Два детальных золотых лёгких с ветвящимися бронхами */}
+            <g filter="url(#neon-bloom)">
+              <path
+                d="M 212 132 C 182 132, 162 168, 164 218 C 166 252, 195 268, 218 248 C 224 215, 222 155, 212 132 Z"
+                fill="#fef08a"
+              />
+              <path
+                d="M 244 134 C 274 134, 294 170, 292 222 C 290 256, 262 272, 238 250 C 232 215, 234 155, 244 134 Z"
+                fill="#fef08a"
+              />
+            </g>
+            {/* Трахея и тонкие сосуды бронхиального дерева внутри лёгких */}
+            <path
+              d="M 228 108 L 228 162 M 228 162 L 195 188 M 195 188 L 178 215 M 195 188 L 204 228 M 228 162 L 260 192 M 260 192 L 276 220 M 260 192 L 250 232"
+              stroke="#d97706"
+              strokeWidth="2.4"
+              fill="none"
+            />
+          </g>
+
+          {/* 4. ПАВШИЙ ДЕТЕКТИВ НА РУКАХ ДОЛОРЕС (КОНТРАСТ ЗОЛОТА И БЕРЛИНСКОЙ ЛАЗУРИ) */}
+          <g>
+            {/* Запрокинутая бородатая голова в профиль (x: 75..195, y: 215..315) */}
+            <path
+              d="M 78 272 Q 95 228 142 224 L 162 218 L 175 232 L 194 238 Q 202 265 182 292 L 145 318 L 82 308 Z"
+              fill="url(#dp-body-grad)"
+              stroke="#0f172a"
+              strokeWidth="2.5"
+            />
+            {/* Волосы и густая борода в сине-фиолетовой тени */}
+            <path
+              d="M 74 268 Q 88 232 128 232 Q 112 265 128 295 L 188 242 Q 202 268 178 296 L 135 318 L 78 305 Z"
+              fill="#1e293b"
+            />
+            {/* Золотой блик на переносице, скуле и груди от света лёгких */}
+            <polygon points="138,225 162,218 172,235 145,248" fill="#fef3c7" />
+
+            {/* Торс, рельеф рёбер и опущенная правая рука в глубоких синих мазках */}
+            <path
+              d="M 155 305 Q 255 315 365 395 L 385 520 L 245 535 L 142 395 Z"
+              fill="url(#dp-body-grad)"
+              stroke="#09111e"
+              strokeWidth="2.5"
+            />
+            {/* Опущенная рука в берлинской лазури */}
+            <path
+              d="M 142 342 Q 185 345 208 425 L 285 615 L 335 725 L 285 745 L 235 635 L 145 455 Z"
+              fill="#172c4c"
+              stroke="#08101d"
+              strokeWidth="2.8"
+            />
+            {/* Золотой контурный рефлекс вдоль верхнего края плеча и груди */}
+            <path
+              d="M 162 306 Q 258 318 358 392"
+              stroke="#fde68a"
+              strokeWidth="4"
+              fill="none"
+            />
+          </g>
+        </g>
+      )}
+
+      {/* ==================================================================== */}
+      {/* ХОЛСТ IV: УХМЫЛКА КУСТО // ЗЕРКАЛО В «ТАНЦАХ В ТРЯПЬЕ»               */}
+      {/* ==================================================================== */}
+      {theme === "cousteau_grin" && (
+        <g>
+          <defs>
+            <linearGradient id="cg-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#283834" />
+              <stop offset="32%" stopColor="#1d2825" />
+              <stop offset="70%" stopColor="#121817" />
+              <stop offset="100%" stopColor="#0a0d0c" />
+            </linearGradient>
+          </defs>
+
+          {/* 1. Ночной дождливый задник Мартинеза на все 1260px */}
+          <rect width="1260" height="800" fill="url(#cg-bg)" />
+
+          {/* Диагональные экспрессионистские мазки охры, бирюзы и кремового света слева */}
+          <g opacity="0.9">
+            <polygon points="-20,180 220,-20 310,-20 40,260" fill="#d9822b" />
+            <polygon points="180,220 440,-20 540,-20 260,310" fill="#2d6a65" />
+            <polygon points="280,380 620,40 690,110 340,460" fill="#d9822b" opacity="0.65" />
+            {/* Кремово-пергаментный ореол мастихином позади головы Гарри */}
+            <polygon points="45,145 335,75 375,445 85,495" fill="#e6ead2" />
+          </g>
+
+          {/* Огни ночного Мартинеза и капли дождя на заднике справа под таблицей S.M.A.R.T. */}
+          <g filter="url(#neon-bloom)" opacity="0.32">
+            <circle cx="640" cy="220" r="45" fill="#f59e0b" />
+            <circle cx="920" cy="180" r="65" fill="#0ea5e9" />
+            <circle cx="1080" cy="420" r="55" fill="#d97706" />
+            <circle cx="780" cy="540" r="40" fill="#14b8a6" />
+          </g>
+
+          {/* 2. ПОРТРЕТ ГАРРИ С УХМЫЛКОЙ «ВЫРАЖЕНИЕ» (ТУШЬ + ПАСТОЗНАЯ ГУАШЬ) */}
+          <g>
+            {/* Оливково-зелёный пиджак */}
+            <path
+              d="M 10 800 L 52 485 L 155 445 L 265 455 L 365 510 L 405 800 Z"
+              fill="#2d3e1e"
+              stroke="#121a0c"
+              strokeWidth="3.5"
+            />
+            {/* Огромный белый остроконечный диско-воротник рубашки */}
+            <polygon
+              points="136,442 98,625 168,548 176,800 228,800 234,555 292,612 252,452"
+              fill="#d8dfd5"
+              stroke="#1c2419"
+              strokeWidth="3"
+            />
+            {/* Ужасающий галстук */}
+            <polygon
+              points="182,525 216,525 224,800 174,800"
+              fill="#3b4d21"
+              stroke="#141c0b"
+              strokeWidth="2.5"
+            />
+            <polygon points="184,565 214,580 212,625 182,610" fill="#d98a26" />
+            <polygon points="182,645 216,660 214,705 180,690" fill="#b84a28" />
+
+            {/* Серо-пепельный подбородок и шея */}
+            <polygon
+              points="148,408 248,412 242,515 154,505"
+              fill="#6e6d68"
+              stroke="#1f1e1b"
+              strokeWidth="3"
+            />
+            <polygon points="164,415 232,418 226,465 170,460" fill="#9c9b94" />
+
+            {/* Основа лица и ухо */}
+            <path
+              d="M 102 275 L 124 275 L 128 345 L 100 335 Z"
+              fill="#9e3f32"
+              stroke="#24120e"
+              strokeWidth="2.8"
+            />
+            <path
+              d="M 122 205 L 278 212 L 284 378 L 238 432 L 158 428 L 118 368 Z"
+              fill="#c7b2a3"
+              stroke="#241511"
+              strokeWidth="3"
+            />
+
+            {/* Похмельный багрово-терракотовый румянец на щеках, переносице и вокруг глаз */}
+            <polygon points="132,292 272,302 262,375 138,365" fill="#b85646" />
+            <polygon points="186,295 224,298 228,362 182,358" fill="#9e382b" />
+
+            {/* Знаменитый чисто-белый блик мастихином посреди лба */}
+            <polygon points="168,198 226,212 238,268 182,258" fill="#f7f9f4" />
+
+            {/* Морщины на лбу, прищуренные глаза и мешки под глазами */}
+            <path
+              d="M 164 228 Q 208 242 254 232 M 172 244 Q 212 256 248 248"
+              stroke="#2b1914"
+              strokeWidth="2.4"
+              fill="none"
+            />
+            {/* Брови */}
+            <path
+              d="M 142 276 Q 168 268 194 284 M 222 288 Q 248 278 272 288"
+              stroke="#261611"
+              strokeWidth="5.5"
+              strokeLinecap="round"
+              fill="none"
+            />
+            {/* Прищуренные глаза */}
+            <ellipse cx="168" cy="300" rx="18" ry="7" fill="#591f18" />
+            <ellipse cx="168" cy="300" rx="11" ry="3.5" fill="#170b09" />
+            <circle cx="165" cy="299" r="2" fill="#fff" />
+
+            <ellipse cx="242" cy="308" rx="17" ry="7" fill="#4a1913" />
+            <ellipse cx="242" cy="308" rx="10" ry="3.5" fill="#170b09" />
+            <circle cx="240" cy="307" r="2" fill="#fff" />
+
+            {/* Густые бакенбарды и усы, соединённые воедино */}
+            <path
+              d="M 116 285 L 92 365 L 118 408 L 154 398 L 198 378 L 245 402 L 278 415 L 298 368 L 278 298 L 258 358 L 202 346 L 142 352 Z"
+              fill="#291711"
+              stroke="#120a07"
+              strokeWidth="3"
+            />
+
+            {/* Кривая зубастая ухмылка «Выражения» (The Expression) */}
+            <path
+              d="M 166 382 Q 200 404 234 388 Q 200 422 166 382 Z"
+              fill="#140907"
+              stroke="#140907"
+              strokeWidth="2"
+            />
+            <polygon points="174,386 224,390 220,398 176,395" fill="#f2efe9" />
+            <path d="M 176 404 Q 200 414 224 404" stroke="#c96b5e" strokeWidth="4.5" fill="none" />
+
+            {/* Растрёпанная шевелюра сверху с падающими на лоб волосками */}
+            <path
+              d="M 102 248 Q 108 158 178 152 Q 235 138 282 178 Q 308 212 284 265 L 265 212 L 195 198 L 132 218 Z"
+              fill="#241915"
+              stroke="#0f0a08"
+              strokeWidth="2.8"
+            />
+            <path
+              d="M 215 182 Q 238 218 218 246 M 234 188 Q 254 225 235 254"
+              stroke="#1c1310"
+              strokeWidth="2.5"
+              fill="none"
+            />
+          </g>
+        </g>
+      )}
+
+      {/* Финальный слой переплетения холста поверх всей панорамы */}
+      <rect width="1260" height="800" fill="url(#canvas-weave)" />
+    </svg>
+  );
+}
+
+// ============================================================================
+// 5. БАЗА ДАННЫХ НАКОПИТЕЛЕЙ И РЕПЛИК НАВЫКОВ
 // ============================================================================
 
 const INITIAL_DRIVES: DriveProfile[] = [
@@ -630,14 +1475,42 @@ function parseRealSmartReport(rawText: string): DriveProfile | null {
 }
 
 // ============================================================================
-// 5. ГЛАВНЫЙ КОМПОНЕНТ (ЧИСТАЯ ВИТРИНА ПОД ВАШИ 4 ИЛЛЮСТРАЦИИ)
+// 6. ГЛАВНЫЙ КОМПОНЕНТ (ПАНОРАМНОЕ ОКНО CRYSTALDISKINFO SPECIAL EDITION)
 // ============================================================================
 
 const INITIAL_SLOTS: ArtworkSlot[] = [
-  { id: "slot_1", title: "Холст I", repoPath: "/art1.jpg", customDataUrl: null },
-  { id: "slot_2", title: "Холст II", repoPath: "/art2.jpg", customDataUrl: null },
-  { id: "slot_3", title: "Холст III", repoPath: "/art3.jpg", customDataUrl: null },
-  { id: "slot_4", title: "Холст IV", repoPath: "/art4.jpg", customDataUrl: null },
+  {
+    id: "slot_1",
+    title: "I. Взрыв (B' B'')",
+    theme: "mind_burst",
+    accentColor: "#ff007f",
+    ambientGlow: "rgba(255, 0, 127, 0.24)",
+    customDataUrl: null,
+  },
+  {
+    id: "slot_2",
+    title: "II. Церковь и Долорес",
+    theme: "church_lasers",
+    accentColor: "#00e5ff",
+    ambientGlow: "rgba(0, 229, 255, 0.22)",
+    customDataUrl: null,
+  },
+  {
+    id: "slot_3",
+    title: "III. Пьета Инсулиндии",
+    theme: "dolores_pieta",
+    accentColor: "#f59e0b",
+    ambientGlow: "rgba(245, 158, 11, 0.24)",
+    customDataUrl: null,
+  },
+  {
+    id: "slot_4",
+    title: "IV. Ухмылка Кусто",
+    theme: "cousteau_grin",
+    accentColor: "#d9822b",
+    ambientGlow: "rgba(45, 106, 101, 0.28)",
+    customDataUrl: null,
+  },
 ];
 
 export default function CrystalDiskElysiumEdition() {
@@ -646,7 +1519,6 @@ export default function CrystalDiskElysiumEdition() {
 
   const [artSlots, setArtSlots] = useState<ArtworkSlot[]>(INITIAL_SLOTS);
   const [activeSlotIdx, setActiveSlotIdx] = useState<number>(0);
-  const [missingRepoFiles, setMissingRepoFiles] = useState<Record<string, boolean>>({});
 
   const [rawFormat, setRawFormat] = useState<"HEX16" | "DEC10">("HEX16");
   const [selectedAttrId, setSelectedAttrId] = useState<string>("01");
@@ -670,13 +1542,12 @@ export default function CrystalDiskElysiumEdition() {
       skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
       category: "PSY",
       difficulty: "Средне: Успех",
-      text: "Кликни по любой строке S.M.A.R.T. для чтения регистра. Чтобы поставить свои 4 арта — перетащи их сюда мышкой, нажми Ctrl + V или положи в папку public/ репозитория как art1.jpg – art4.jpg.",
+      text: "Переключай 4 панорамных полотна в правом верхнем углу окна или кликни по любой строке S.M.A.R.T., чтобы услышать голоса внутри контроллера.",
     },
   ]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Восстановление пользовательских артов из IndexedDB
   useEffect(() => {
     loadArtsFromDB().then((savedMap) => {
       setArtSlots((prev) =>
@@ -688,7 +1559,6 @@ export default function CrystalDiskElysiumEdition() {
     });
   }, []);
 
-  // Вставка картинки по Ctrl + V прямо в активный слот
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
@@ -717,7 +1587,6 @@ export default function CrystalDiskElysiumEdition() {
     return () => window.removeEventListener("paste", handlePaste);
   }, [activeSlotIdx]);
 
-  // Автоподхват реальных дисков в Electron (.exe / .deb / .dmg)
   useEffect(() => {
     const win = window as unknown as {
       electronSMART?: { getRealDrives: () => Promise<DriveProfile[]> };
@@ -737,9 +1606,6 @@ export default function CrystalDiskElysiumEdition() {
 
   const activeDrive = drives[activeDriveIdx] || drives[0];
   const currentArtSlot = artSlots[activeSlotIdx] || artSlots[0];
-  const activeArtSrc =
-    currentArtSlot.customDataUrl ||
-    (!missingRepoFiles[currentArtSlot.repoPath] ? currentArtSlot.repoPath : null);
 
   const handleArtFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -765,10 +1631,22 @@ export default function CrystalDiskElysiumEdition() {
     soundFX.playCheckChord(true);
   };
 
+  const resetCustomSlot = () => {
+    const slotKey = `slot_${activeSlotIdx + 1}`;
+    saveArtToDB(slotKey, "");
+    setArtSlots((prev) =>
+      prev.map((s, idx) => (idx === activeSlotIdx ? { ...s, customDataUrl: null } : s))
+    );
+    soundFX.playRelayClick();
+  };
+
   const handleSelectDrive = (idx: number) => {
     const drv = drives[idx];
     setActiveDriveIdx(idx);
     soundFX.playRelayClick();
+
+    if (drv.healthStatus === "BAD") setActiveSlotIdx(2); // Пьета Долорес
+    else if (drv.healthStatus === "CAUTION") setActiveSlotIdx(1); // Церковь и лазеры
 
     setThoughts([
       {
@@ -881,6 +1759,9 @@ export default function CrystalDiskElysiumEdition() {
   return (
     <div
       className="cdi-viewport"
+      style={{
+        background: `radial-gradient(circle at 22% 35%, ${currentArtSlot.ambientGlow}, transparent 55%), radial-gradient(circle at 82% 75%, ${currentArtSlot.ambientGlow}, transparent 55%), #070609`,
+      }}
       onDragOver={(e) => {
         e.preventDefault();
         setIsDraggingOver(true);
@@ -892,6 +1773,31 @@ export default function CrystalDiskElysiumEdition() {
         handleArtFiles(e.dataTransfer.files);
       }}
     >
+      {/* АТМОСФЕРНЫЙ ВНЕШНИЙ ЗАДНИК ЭКРАНА: ТОПОГРАФИЧЕСКИЕ ИЗОЛИНИИ СЕРОТЫ */}
+      <svg
+        viewBox="0 0 1920 1080"
+        preserveAspectRatio="xMidYMid slice"
+        style={{
+          position: "fixed",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          pointerEvents: "none",
+          zIndex: 0,
+          opacity: 0.35,
+        }}
+      >
+        <g fill="none" stroke="rgba(212, 163, 89, 0.18)" strokeWidth="1">
+          <ellipse cx="320" cy="540" rx="480" ry="320" strokeDasharray="12 8" />
+          <ellipse cx="320" cy="540" rx="640" ry="440" />
+          <ellipse cx="320" cy="540" rx="820" ry="580" strokeDasharray="4 10" />
+          <ellipse cx="1580" cy="480" rx="520" ry="360" />
+          <ellipse cx="1580" cy="480" rx="720" ry="510" strokeDasharray="16 12" />
+          <line x1="0" y1="180" x2="1920" y2="180" opacity="0.4" />
+          <line x1="0" y1="900" x2="1920" y2="900" opacity="0.4" />
+        </g>
+      </svg>
+
       <style
         dangerouslySetInnerHTML={{
           __html: `
@@ -910,7 +1816,7 @@ export default function CrystalDiskElysiumEdition() {
         body, html {
           margin: 0;
           padding: 0;
-          background: #0b0a09;
+          background: #070609;
           color: #e8e2d5;
           font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
           font-size: 12.5px;
@@ -930,48 +1836,39 @@ export default function CrystalDiskElysiumEdition() {
           align-items: center;
           justify-content: center;
           padding: 14px;
-          background: #090807;
+          position: relative;
+          transition: background 0.4s ease;
         }
 
-        /* ОКНО НАТИВНОЙ УТИЛИТЫ (БЕЗ ОБРЕЗКИ НИЖНЕГО КРАЯ) */
+        /* ГЛАВНОЕ ОКНО CRYSTALDISKINFO SPECIAL EDITION */
         .cdi-window-frame {
           width: 100%;
-          max-width: 1180px;
-          min-height: 760px;
+          max-width: 1220px;
+          min-height: 768px;
           position: relative;
+          z-index: 5;
           display: flex;
           flex-direction: column;
-          background: #141210;
-          border: 1px solid #3a342d;
-          box-shadow: 0 28px 80px rgba(0, 0, 0, 0.92);
+          background: #100d14;
+          border: 1px solid rgba(212, 163, 89, 0.36);
+          box-shadow:
+            0 32px 95px rgba(0, 0, 0, 0.94),
+            0 0 60px rgba(0, 0, 0, 0.8);
           overflow: hidden;
-        }
-
-        /* Мягкая подсветка правой стеклянной панели цветами активного арта */
-        .ambient-backdrop-img {
-          position: absolute;
-          inset: 0;
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          filter: blur(34px) saturate(1.35) brightness(0.32);
-          transform: scale(1.08);
-          pointer-events: none;
-          z-index: 0;
         }
 
         .win-titlebar {
           position: relative;
           z-index: 20;
           height: 28px;
-          background: #181512;
-          border-bottom: 1px solid #2c2620;
+          background: rgba(14, 11, 18, 0.92);
+          border-bottom: 1px solid rgba(212, 163, 89, 0.18);
           padding: 0 12px;
           display: flex;
           align-items: center;
           justify-content: space-between;
           font-size: 12px;
-          color: #ccc2b2;
+          color: #d4cbbd;
           user-select: none;
         }
         .win-controls {
@@ -984,9 +1881,10 @@ export default function CrystalDiskElysiumEdition() {
         .win-menubar {
           position: relative;
           z-index: 20;
-          height: 28px;
-          background: rgba(28, 24, 21, 0.96);
-          border-bottom: 1px solid #383028;
+          height: 29px;
+          background: rgba(20, 17, 26, 0.88);
+          backdrop-filter: blur(10px);
+          border-bottom: 1px solid rgba(212, 163, 89, 0.24);
           padding: 0 8px;
           display: flex;
           align-items: center;
@@ -1016,28 +1914,32 @@ export default function CrystalDiskElysiumEdition() {
           gap: 4px;
         }
         .slot-btn {
-          background: transparent;
-          border: 1px solid transparent;
-          color: #9e9383;
-          padding: 2px 9px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(212, 163, 89, 0.2);
+          color: #b8ae9e;
+          padding: 2px 10px;
           font-size: 11px;
           cursor: pointer;
+          transition: all 0.15s;
         }
         .slot-btn:hover {
-          color: #e8e2d5;
+          color: #fff;
+          border-color: rgba(212, 163, 89, 0.5);
         }
         .slot-btn.active {
-          background: rgba(212, 163, 89, 0.16);
-          border-color: rgba(212, 163, 89, 0.45);
-          color: #f3ead8;
+          background: rgba(212, 163, 89, 0.22);
+          border-color: #d4a359;
+          color: #fff;
+          font-weight: 600;
         }
 
+        /* РАБОЧАЯ СЕТКА ПОВЕРХ ПАНОРАМНОГО ПОЛОТНА */
         .cdi-main-split {
           position: relative;
           z-index: 10;
           flex: 1;
           display: grid;
-          grid-template-columns: 380px 1fr;
+          grid-template-columns: 390px 1fr;
         }
         @media (max-width: 1024px) {
           .cdi-main-split {
@@ -1045,21 +1947,30 @@ export default function CrystalDiskElysiumEdition() {
           }
         }
 
-        /* Левая витрина под иллюстрацию */
+        /* Левая витрина полностью прозрачна, открывая персонажа на панорамном холсте */
         .left-artwork-pane {
           position: relative;
-          border-right: 1px solid rgba(255, 255, 255, 0.12);
-          background: #0e0c0a;
-          overflow: hidden;
+          min-height: 680px;
+          border-right: 1px solid rgba(212, 163, 89, 0.22);
           display: flex;
           flex-direction: column;
+          justify-content: flex-end;
+        }
+        .left-art-caption {
+          padding: 8px 12px;
+          background: linear-gradient(0deg, rgba(10, 8, 14, 0.88) 0%, transparent 100%);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 11px;
+          color: rgba(232, 226, 213, 0.78);
         }
 
-        /* Правая панель данных CrystalDiskInfo */
+        /* Правая панель из дымчатого стекла: сквозь неё просвечивает правая часть картины! */
         .right-data-pane {
-          background: rgba(18, 16, 14, 0.76);
-          backdrop-filter: blur(14px);
-          padding: 10px 16px 14px 16px;
+          background: rgba(12, 10, 17, 0.54);
+          backdrop-filter: blur(7px);
+          padding: 10px 18px 14px 18px;
           display: flex;
           flex-direction: column;
           gap: 8px;
@@ -1069,29 +1980,30 @@ export default function CrystalDiskElysiumEdition() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.14);
           padding-bottom: 6px;
         }
         .drive-tabs-group {
           display: flex;
-          gap: 4px;
+          gap: 5px;
         }
         .cdi-drive-tab {
-          padding: 4px 12px;
-          background: rgba(255, 255, 255, 0.04);
-          border: 1px solid rgba(255, 255, 255, 0.14);
+          padding: 4px 13px;
+          background: rgba(14, 12, 20, 0.65);
+          border: 1px solid rgba(255, 255, 255, 0.18);
           color: #d4cbbd;
           cursor: pointer;
           text-align: center;
           line-height: 1.25;
           font-size: 11.5px;
-          min-width: 92px;
+          min-width: 96px;
+          transition: all 0.14s;
         }
         .cdi-drive-tab:hover {
-          background: rgba(255, 255, 255, 0.09);
+          background: rgba(255, 255, 255, 0.12);
         }
         .cdi-drive-tab.active {
-          background: rgba(255, 255, 255, 0.14);
+          background: rgba(212, 163, 89, 0.22);
           border-color: #d4a359;
           color: #ffffff;
           font-weight: 600;
@@ -1099,16 +2011,16 @@ export default function CrystalDiskElysiumEdition() {
 
         .cdi-model-row {
           text-align: center;
-          padding: 2px 0 4px 0;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+          padding: 2px 0 5px 0;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.14);
         }
         .cdi-model-name {
           margin: 0;
-          font-size: 21px;
+          font-size: 22px;
           font-weight: 600;
           letter-spacing: 0.01em;
-          color: #f7f3eb;
-          text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
+          color: #ffffff;
+          text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
         }
 
         .cdi-specs-grid {
@@ -1129,17 +2041,18 @@ export default function CrystalDiskElysiumEdition() {
         .cdi-spec-label {
           text-align: right;
           font-size: 12px;
-          color: #ccc2b2;
+          color: #ded6c8;
+          text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
           white-space: nowrap;
         }
         .cdi-spec-box {
-          height: 22px;
+          height: 23px;
           padding: 0 8px;
           display: flex;
           align-items: center;
-          background: rgba(10, 9, 8, 0.65);
-          border: 1px solid rgba(255, 255, 255, 0.16);
-          color: #f5f0e6;
+          background: rgba(8, 7, 12, 0.62);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          color: #ffffff;
           font-size: 12px;
           white-space: nowrap;
           overflow: hidden;
@@ -1153,29 +2066,30 @@ export default function CrystalDiskElysiumEdition() {
           padding: 2px 0 4px 0;
         }
         .cdi-status-badge {
-          height: 28px;
+          height: 29px;
           display: flex;
           align-items: center;
           justify-content: center;
           font-size: 13.5px;
           font-weight: 700;
           color: #fff;
-          border: 1px solid rgba(255, 255, 255, 0.32);
-          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+          border: 1px solid rgba(255, 255, 255, 0.36);
+          text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
         }
         .status-good {
-          background: linear-gradient(180deg, rgba(46, 111, 128, 0.85), rgba(27, 71, 84, 0.92));
+          background: linear-gradient(180deg, rgba(42, 118, 138, 0.86), rgba(22, 68, 84, 0.92));
         }
         .status-caution {
-          background: linear-gradient(180deg, rgba(180, 105, 28, 0.88), rgba(122, 66, 14, 0.94));
+          background: linear-gradient(180deg, rgba(196, 112, 26, 0.88), rgba(128, 66, 12, 0.94));
         }
         .status-bad {
-          background: linear-gradient(180deg, rgba(168, 36, 45, 0.9), rgba(107, 19, 26, 0.95));
+          background: linear-gradient(180deg, rgba(185, 32, 46, 0.9), rgba(112, 16, 26, 0.95));
         }
 
+        /* Полупрозрачная таблица S.M.A.R.T. */
         .cdi-table-wrapper {
-          background: rgba(10, 9, 8, 0.68);
-          border: 1px solid rgba(255, 255, 255, 0.16);
+          background: rgba(8, 7, 12, 0.64);
+          border: 1px solid rgba(255, 255, 255, 0.18);
         }
         .cdi-smart-table {
           width: 100%;
@@ -1183,43 +2097,44 @@ export default function CrystalDiskElysiumEdition() {
           font-size: 12px;
         }
         .cdi-smart-table th {
-          background: #1c1916;
-          color: #ccc2b2;
+          background: rgba(20, 17, 28, 0.88);
+          color: #d8cfc2;
           font-weight: 500;
           padding: 5px 8px;
           text-align: left;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.2);
           white-space: nowrap;
         }
         .cdi-smart-table td {
           padding: 4.5px 8px;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-          color: #ebe5d8;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+          color: #f2ece1;
         }
         .cdi-smart-table tr {
           cursor: pointer;
+          transition: background 0.1s;
         }
         .cdi-smart-table tr:hover td {
-          background: rgba(255, 255, 255, 0.07);
+          background: rgba(255, 255, 255, 0.09);
         }
         .cdi-smart-table tr.selected-row td {
-          background: rgba(194, 125, 56, 0.24);
+          background: rgba(212, 163, 89, 0.26);
         }
         .cdi-dot {
           width: 10px;
           height: 10px;
           border-radius: 50%;
           display: inline-block;
-          border: 1px solid rgba(0, 0, 0, 0.6);
+          border: 1px solid rgba(0, 0, 0, 0.65);
         }
-        .dot-good { background: #4ea8de; }
-        .dot-caution { background: #e09f3e; }
-        .dot-bad { background: #d1495b; }
+        .dot-good { background: #4ea8de; box-shadow: 0 0 6px #4ea8de; }
+        .dot-caution { background: #e09f3e; box-shadow: 0 0 6px #e09f3e; }
+        .dot-bad { background: #d1495b; box-shadow: 0 0 6px #d1495b; }
 
         .zaum-dialogue-strip {
           margin-top: auto;
-          background: rgba(14, 12, 10, 0.92);
-          border: 1px solid rgba(212, 163, 89, 0.28);
+          background: rgba(11, 9, 15, 0.88);
+          border: 1px solid rgba(212, 163, 89, 0.32);
           padding: 10px 14px;
           display: flex;
           flex-direction: column;
@@ -1229,7 +2144,7 @@ export default function CrystalDiskElysiumEdition() {
           margin: 0;
           font-size: 15px;
           line-height: 1.42;
-          color: #ede6d6;
+          color: #f2ece1;
         }
         .zaum-skill-name {
           font-family: 'Inter', sans-serif;
@@ -1240,14 +2155,14 @@ export default function CrystalDiskElysiumEdition() {
         }
         .zaum-check-meta {
           font-style: italic;
-          color: #9e9383;
+          color: #a89f91;
           font-size: 13.5px;
           margin: 0 6px;
         }
         .zaum-red-prompt {
           margin-top: 2px;
           padding-top: 6px;
-          border-top: 1px solid rgba(255, 255, 255, 0.08);
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -1257,7 +2172,7 @@ export default function CrystalDiskElysiumEdition() {
           background: none;
           border: none;
           padding: 0;
-          color: #d95338;
+          color: #e05a3c;
           font-size: 14.5px;
           font-weight: 600;
           cursor: pointer;
@@ -1294,15 +2209,18 @@ export default function CrystalDiskElysiumEdition() {
           }}
         >
           <div className="serif-zaum" style={{ fontSize: "26px", color: "#f3ead8" }}>
-            Отпустите ваши иллюстрации (можно сразу все 4 файла)
+            Отпустите ваши иллюстрации для установки на панорамный холст
           </div>
         </div>
       )}
 
       {/* ОКНО CRYSTALDISKINFO SPECIAL EDITION */}
       <div className="cdi-window-frame">
-        {/* Размытая цветовая проекция текущего арта под правой стеклянной панелью */}
-        {activeArtSrc && <img src={activeArtSrc} alt="" className="ambient-backdrop-img" />}
+        {/* ПАНОРАМНОЕ ХУДОЖЕСТВЕННОЕ ПОЛОТНО НА ВСЮ ШИРИНУ И ВЫСОТУ ОКНА */}
+        <PanoramicMasterpieceArtwork
+          theme={currentArtSlot.theme}
+          customUrl={currentArtSlot.customDataUrl}
+        />
 
         <div className="win-titlebar">
           <span>CrystalDiskInfo 9.8.0 Disco Elysium Edition x64</span>
@@ -1331,8 +2249,13 @@ export default function CrystalDiskElysiumEdition() {
               Вид ({rawFormat === "HEX16" ? "HEX" : "DEC"})
             </button>
             <button onClick={() => fileInputRef.current?.click()} className="menu-link">
-              Холст (Выбрать 4 файла...)
+              Свой арт...
             </button>
+            {currentArtSlot.customDataUrl && (
+              <button onClick={resetCustomSlot} className="menu-link">
+                Сбросить арт
+              </button>
+            )}
             <button
               onClick={() => {
                 soundFX.enabled = !soundOn;
@@ -1358,88 +2281,31 @@ export default function CrystalDiskElysiumEdition() {
         </nav>
 
         <div className="cdi-main-split">
-          {/* ЛЕВАЯ КОЛОНКА: ТОЛЬКО ОРИГИНАЛЬНЫЙ АРТ (БЕЗ ПРОЦЕДУРНОЙ МАЗНИ) */}
-          <aside className="left-artwork-pane">
-            {activeArtSrc ? (
-              <img
-                src={activeArtSrc}
-                alt={currentArtSlot.title}
-                onClick={() => fileInputRef.current?.click()}
-                onError={() =>
-                  setMissingRepoFiles((prev) => ({
-                    ...prev,
-                    [currentArtSlot.repoPath]: true,
-                  }))
-                }
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  objectPosition: "center top",
-                  display: "block",
-                  cursor: "pointer",
-                }}
-                title="Кликните, чтобы заменить иллюстрацию"
-              />
-            ) : (
-              <div
+          {/* ЛЕВАЯ КОЛОНКА: ОТКРЫТАЯ ВИТРИНА ПАНОРАМНОГО ХОЛСТА */}
+          <aside
+            className="left-artwork-pane"
+            onClick={() => setActiveSlotIdx((prev) => (prev + 1) % artSlots.length)}
+            title="Кликните по картине для переключения следующего полотна"
+          >
+            <div className="left-art-caption" onClick={(e) => e.stopPropagation()}>
+              <span>{currentArtSlot.title}</span>
+              <button
                 onClick={() => fileInputRef.current?.click()}
                 style={{
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "32px 24px",
-                  textAlign: "center",
+                  background: "rgba(18, 15, 22, 0.8)",
+                  border: "1px solid rgba(212, 163, 89, 0.4)",
+                  color: "#e8e2d5",
+                  padding: "2px 8px",
+                  fontSize: "11px",
                   cursor: "pointer",
-                  background:
-                    "radial-gradient(circle at 50% 40%, rgba(42, 34, 28, 0.55), #0e0c0a 80%)",
                 }}
               >
-                <div
-                  className="serif-zaum"
-                  style={{
-                    fontSize: "20px",
-                    color: "#d4a359",
-                    marginBottom: "10px",
-                    letterSpacing: "0.02em",
-                  }}
-                >
-                  {currentArtSlot.title}
-                </div>
-                <p
-                  style={{
-                    fontSize: "12.5px",
-                    color: "#a89f91",
-                    lineHeight: 1.55,
-                    margin: "0 0 18px 0",
-                  }}
-                >
-                  Нажмите сюда, чтобы выбрать ваши 4 иллюстрации, перетащите их мышкой в окно или
-                  нажмите <strong className="mono">Ctrl + V</strong>.
-                  <br />
-                  <br />
-                  Для постоянной прошивки в GitHub положите файл в папку{" "}
-                  <span className="mono" style={{ color: "#e8e2d5" }}>
-                    public{currentArtSlot.repoPath}
-                  </span>
-                </p>
-                <span
-                  style={{
-                    padding: "6px 14px",
-                    border: "1px solid rgba(212, 163, 89, 0.5)",
-                    color: "#f3ead8",
-                    fontSize: "12px",
-                  }}
-                >
-                  Загрузить иллюстрации...
-                </span>
-              </div>
-            )}
+                Ctrl+V / Файл
+              </button>
+            </div>
           </aside>
 
-          {/* ПРАВАЯ КОЛОНКА: ДАННЫЕ CRYSTALDISKINFO + СТРОКА ДИАЛОГА ZA/UM */}
+          {/* ПРАВАЯ КОЛОНКА: ДЫМЧАТОЕ СТЕКЛО ПОВЕРХ ПРАВОЙ ЧАСТИ КАРТИНЫ */}
           <main className="right-data-pane">
             <div className="cdi-drive-strip">
               <div className="drive-tabs-group">
@@ -1462,7 +2328,7 @@ export default function CrystalDiskElysiumEdition() {
                 ))}
               </div>
 
-              <div className="mono" style={{ fontSize: "11px", color: "#a89f91" }}>
+              <div className="mono" style={{ fontSize: "11px", color: "#d4cbbd" }}>
                 Регистр: {selectedAttrId}h | Кости: [{lastDice[0]}][{lastDice[1]}]
               </div>
             </div>
@@ -1649,7 +2515,7 @@ export default function CrystalDiskElysiumEdition() {
                   1. [ИНТЕРФЕЙС: Белая проверка 2d6] Прослушать контроллер накопителя{" "}
                   {activeDrive.letter}
                 </button>
-                <span className="mono" style={{ fontSize: "11px", color: "#8c8273" }}>
+                <span className="mono" style={{ fontSize: "11px", color: "#a89f91" }}>
                   Кости: {lastDice[0]} + {lastDice[1]}
                 </span>
               </div>
@@ -1663,7 +2529,7 @@ export default function CrystalDiskElysiumEdition() {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(8, 7, 6, 0.85)",
+            background: "rgba(8, 7, 10, 0.85)",
             zIndex: 80,
             display: "flex",
             alignItems: "center",
@@ -1675,8 +2541,8 @@ export default function CrystalDiskElysiumEdition() {
             style={{
               width: "100%",
               maxWidth: "600px",
-              background: "#181512",
-              border: "1px solid #574b3d",
+              background: "#16131c",
+              border: "1px solid #d4a359",
               padding: "20px",
             }}
           >
@@ -1696,7 +2562,7 @@ export default function CrystalDiskElysiumEdition() {
               className="mono"
               style={{
                 width: "100%",
-                background: "#0e0c0a",
+                background: "#0c0a10",
                 border: "1px solid #3a3228",
                 color: "#e8e2d5",
                 padding: "10px",
