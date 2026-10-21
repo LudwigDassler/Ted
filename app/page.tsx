@@ -7,7 +7,6 @@ import React, { useState, useEffect, useRef } from "react";
 // ============================================================================
 
 type HealthState = "GOOD" | "CAUTION" | "BAD";
-type ShaderSceneId = "mind_burst" | "dolores_lungs" | "cousteau_grin" | "church_beams";
 
 interface SmartAttribute {
   id: string;
@@ -61,17 +60,16 @@ interface DialogueMessage {
 interface ArtworkSlot {
   id: string;
   title: string;
-  scene: ShaderSceneId;
   repoPath: string;
   customDataUrl: string | null;
 }
 
 // ============================================================================
-// 2. ХРАНИЛИЩЕ INDEXEDDB ДЛЯ ПОЛЬЗОВАТЕЛЬСКИХ ХОЛСТОВ (CTRL+V / DRAG & DROP)
+// 2. ХРАНИЛИЩЕ INDEXEDDB ДЛЯ СОХРАНЕНИЯ КАРТИНОК В БРАУЗЕРЕ
 // ============================================================================
 
-const DB_NAME = "DiscoCdiMasterpieceDB";
-const STORE_NAME = "canvases";
+const DB_NAME = "DiscoCdiArtworksDB";
+const STORE_NAME = "slots";
 
 function openArtDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -186,569 +184,7 @@ class ElysiumAudio {
 const soundFX = new ElysiumAudio();
 
 // ============================================================================
-// 4. ПОПИКСЕЛЬНЫЙ ШЕЙДЕР МАСЛЯНОЙ ЖИВОПИСИ (3D SDF + FBM + ФИЛЬТР КУВАХАРЫ)
-// ============================================================================
-
-const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
-const mix = (a: number, b: number, t: number) => a + (b - a) * clamp(t, 0, 1);
-const smoothstep = (e0: number, e1: number, x: number) => {
-  const t = clamp((x - e0) / (e1 - e0 || 1e-6), 0, 1);
-  return t * t * (3 - 2 * t);
-};
-
-// Гладкий минимум для органического слияния 3D-скульптуры лица без углов и швов
-const smin = (a: number, b: number, k: number) => {
-  const h = clamp(0.5 + (0.5 * (b - a)) / k, 0.0, 1.0);
-  return mix(b, a, h) - k * h * (1.0 - h);
-};
-
-// Расстояние до отрезка (капсулы) для анатомии шеи, пальцев, бронхов и лучей
-const sdSegment = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
-  const pax = px - ax;
-  const pay = py - ay;
-  const bax = bx - ax;
-  const bay = by - ay;
-  const h = clamp((pax * bax + pay * bay) / (bax * bax + bay * bay + 1e-6), 0, 1);
-  return Math.hypot(pax - bax * h, pay - bay * h);
-};
-
-// Расстояние до наклонного эллипса
-const sdEllipse = (
-  px: number,
-  py: number,
-  cx: number,
-  cy: number,
-  rx: number,
-  ry: number,
-  ang: number
-) => {
-  const dx = px - cx;
-  const dy = py - cy;
-  const c = Math.cos(ang);
-  const s = Math.sin(ang);
-  const ux = (dx * c + dy * s) / rx;
-  const uy = (-dx * s + dy * c) / ry;
-  return (Math.hypot(ux, uy) - 1.0) * Math.min(rx, ry);
-};
-
-// Быстрый двумерный градиентный шум и 4-октавный фрактальный шум (fBM)
-const hash2 = (x: number, y: number) => {
-  const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
-  return h - Math.floor(h);
-};
-
-const noise2D = (x: number, y: number) => {
-  const ix = Math.floor(x);
-  const iy = Math.floor(y);
-  const fx = x - ix;
-  const fy = y - iy;
-  const ux = fx * fx * (3.0 - 2.0 * fx);
-  const uy = fy * fy * (3.0 - 2.0 * fy);
-  const a = hash2(ix, iy);
-  const b = hash2(ix + 1, iy);
-  const c = hash2(ix, iy + 1);
-  const d = hash2(ix + 1, iy + 1);
-  return mix(mix(a, b, ux), mix(c, d, ux), uy);
-};
-
-const fbm = (x: number, y: number) => {
-  let v = 0.0;
-  let amp = 0.5;
-  let px = x;
-  let py = y;
-  for (let i = 0; i < 4; i++) {
-    v += amp * noise2D(px, py);
-    const nx = px * 1.6 - py * 1.2 + 17.3;
-    const ny = px * 1.2 + py * 1.6 + 31.7;
-    px = nx;
-    py = ny;
-    amp *= 0.5;
-  }
-  return v;
-};
-
-/**
- * Рендерит высокодетализированное живописное полотно попиксельно
- * и пропускает его через анизотропный масляный фильтр с рельефом мазка (Impasto)
- */
-function renderOilShaderToCanvas(canvas: HTMLCanvasElement, scene: ShaderSceneId) {
-  const W = canvas.width;
-  const H = canvas.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  const rawBuf = new Float32Array(W * H * 3);
-
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const idx = (y * W + x) * 3;
-      const n1 = fbm(x * 0.015, y * 0.015);
-      const n2 = fbm(x * 0.04 + n1 * 2.2, y * 0.04 - n1 * 1.8);
-
-      let r = 14;
-      let g = 12;
-      let b = 18;
-
-      if (scene === "mind_burst") {
-        // ====================================================================
-        // ХОЛСТ I: ПСИХОДЕЛИЧЕСКИЙ ВЗРЫВ СОЗНАНИЯ (по мотивам @AstriaNabla)
-        // ====================================================================
-        r = mix(10, 28, 1 - y / H);
-        g = mix(7, 12, 1 - y / H);
-        b = mix(18, 46, 1 - y / H);
-
-        // Эпицентр взрыва из правого виска/лба (205, 310) влево-вверх
-        const ox = 205;
-        const oy = 310;
-        const dx = x - ox;
-        const dy = y - oy;
-        const dist = Math.hypot(dx, dy);
-        const ang = Math.atan2(dy, dx);
-
-        // Направленный конус психоделического протуберанца (угол от -175° до -55°)
-        const cone = smoothstep(1.15, 0.15, Math.abs(ang + 2.15));
-        const rayNoise = fbm(ang * 9.5 + n1 * 1.4, dist * 0.018 - n2 * 1.2);
-        const streaks = smoothstep(0.32, 0.78, rayNoise) * cone * smoothstep(490, 20, dist);
-
-        // Цветовая призма: золото в ядре -> огненный оранжевый -> неоновая фуксия -> циан и ультрафиолет
-        const pGold = smoothstep(190, 10, dist) * cone;
-        const pMagenta = smoothstep(0.35, 0.8, fbm(ang * 12.0, dist * 0.025)) * cone;
-        const pCyan = smoothstep(0.55, 0.88, fbm(ang * 16.0 + 4.2, dist * 0.02)) * cone;
-
-        r += streaks * 235 + pGold * 255 + pMagenta * 210 - pCyan * 40;
-        g += streaks * 65 + pGold * 195 - pMagenta * 35 + pCyan * 210;
-        b += streaks * 145 + pGold * 40 + pMagenta * 160 + pCyan * 245;
-
-        // Органическая 3D-скульптура запрокинутой головы, шеи, плеч и руки у виска (через гладкий smin)
-        const dCranium = sdEllipse(x, y, 222, 342, 62, 54, 0.28);
-        const dJaw = sdEllipse(x, y, 205, 382, 48, 42, -0.15);
-        const dSnout = sdEllipse(x, y, 198, 336, 26, 22, -0.25);
-        const dHead = smin(smin(dCranium, dJaw, 18), dSnout, 14);
-
-        const dNeck = sdSegment(x, y, 198, 392, 182, 485) - 36;
-        const dShoulders = sdEllipse(x, y, 195, 595, 165, 130, 0.08);
-        const dHand = smin(
-          sdSegment(x, y, 268, 335, 322, 378) - 14,
-          sdSegment(x, y, 322, 378, 342, 465) - 24,
-          12
-        );
-
-        const dBody = smin(smin(dHead, dNeck, 20), smin(dShoulders, dHand, 16), 14);
-
-        if (dBody < 2.0) {
-          // Внутри силуэта фигуры: считаем 3D-нормали и рельеф мышц/лица
-          const edgeMask = smoothstep(2.0, -3.0, dBody);
-          // Освещение от точки взрыва (ox, oy)
-          const lightIntensity =
-            smoothstep(210, 15, dist) *
-            smoothstep(265, 155, x) *
-            smoothstep(465, 265, y);
-
-          // Глазницы и закатившиеся белки глаз
-          const dEyeL = sdEllipse(x, y, 182, 315, 12, 6.5, -0.25);
-          const dEyeR = sdEllipse(x, y, 236, 325, 13, 7.0, 0.2);
-          // Густые усы и бакенбарды
-          const dMustache = smin(
-            sdSegment(x, y, 162, 368, 202, 352) - 14,
-            sdSegment(x, y, 202, 352, 254, 388) - 16,
-            10
-          );
-          const dHair = sdEllipse(x, y, 268, 345, 42, 68, -0.25);
-
-          // Базовый фиолетово-индиговый тон фигуры в контровом свете
-          let fr = mix(24, 138, lightIntensity * 0.8 + n2 * 0.25);
-          let fg = mix(11, 48, lightIntensity * 0.7 + n2 * 0.15);
-          let fb = mix(36, 128, lightIntensity * 0.75 + n2 * 0.3);
-
-          // Яркий персиково-розовый и золотой рефлекс на лбу, переносице и скуле
-          const faceHighlight =
-            smoothstep(42, -8, dHead) *
-            smoothstep(255, 165, x) *
-            smoothstep(375, 275, y);
-          fr = mix(fr, 255, faceHighlight * 0.88);
-          fg = mix(fg, 168, faceHighlight * 0.78);
-          fb = mix(fb, 182, faceHighlight * 0.75);
-
-          // Тёмные глазницы и светящиеся белки закатившихся глаз
-          if (dEyeL < 4 || dEyeR < 4) {
-            const eyeCore = smoothstep(1.5, -3.0, Math.min(dEyeL, dEyeR));
-            fr = mix(58, 255, eyeCore);
-            fg = mix(18, 230, eyeCore);
-            fb = mix(52, 240, eyeCore);
-          }
-
-          // Тёмный объём усов, бакенбардов, волос и пиджака
-          const darkHairMask = smoothstep(6, -6, Math.min(dMustache, dHair));
-          fr = mix(fr, 28, darkHairMask * 0.88);
-          fg = mix(fg, 10, darkHairMask * 0.9);
-          fb = mix(fb, 34, darkHairMask * 0.85);
-
-          if (y > 455) {
-            // Пиджак и воротник рубашки
-            const collar = smoothstep(14, -2, sdSegment(x, y, 162, 445, 148, 515));
-            fr = mix(fr * 0.45, 225, collar * 0.8);
-            fg = mix(fg * 0.42, 145, collar * 0.7);
-            fb = mix(fb * 0.5, 185, collar * 0.8);
-          }
-
-          r = mix(r, fr, edgeMask);
-          g = mix(g, fg, edgeMask);
-          b = mix(b, fb, edgeMask);
-        }
-      } else if (scene === "dolores_lungs") {
-        // ====================================================================
-        // ХОЛСТ II: ПЬЕТА ДОЛОРЕС // СВЕТЯЩИЕСЯ ЛЁГКИЕ (по мотивам Flora Henderson)
-        // ====================================================================
-        r = mix(18, 38, n1);
-        g = mix(16, 32, n1);
-        b = mix(28, 56, 1 - y / H);
-
-        // Багрово-красные живописные потёки масла вдоль левого края (x < 135)
-        const dripNoise = fbm(x * 0.14, y * 0.008 - n1 * 0.5);
-        const dripMask =
-          smoothstep(145, 15, x) *
-          smoothstep(180, 320, y) *
-          smoothstep(0.38, 0.74, dripNoise);
-        r = mix(r, 195, dripMask);
-        g = mix(g, 22, dripMask);
-        b = mix(b, 28, dripMask);
-
-        // Склонённый лик Долорес Дей вверху (225, 72)
-        const dDoloresHead = sdEllipse(x, y, 225, 72, 34, 42, 0.22);
-        if (dDoloresHead < 8) {
-          const m = smoothstep(8, -6, dDoloresHead);
-          r = mix(r, 218, m * 0.85);
-          g = mix(g, 152, m * 0.8);
-          b = mix(b, 108, m * 0.7);
-        }
-
-        // Два светящихся золотых лёгких в груди Долорес (190, 182) и (246, 186)
-        const dLungL = sdEllipse(x, y, 188, 184, 28, 48, 0.18);
-        const dLungR = sdEllipse(x, y, 244, 188, 28, 48, -0.18);
-        const dLungs = Math.min(dLungL, dLungR);
-
-        // Мягкое золотое свечение вокруг лёгких
-        const glow = Math.exp(-Math.max(0, dLungs) * 0.018);
-        r += glow * 235;
-        g += glow * 165;
-        b += glow * 55;
-
-        if (dLungs < 2) {
-          // Внутри лёгких: древовидные золотисто-белые бронхиолы
-          const bronchi = fbm(x * 0.09, y * 0.09 + n2 * 1.5);
-          const m = smoothstep(2, -5, dLungs);
-          r = mix(r, 255, m);
-          g = mix(g, mix(215, 250, bronchi), m);
-          b = mix(b, mix(115, 210, bronchi), m);
-        }
-
-        // Павший детектив на руках Долорес: запрокинутая голова (132, 262) и обнажённый торс в сине-золотых тонах
-        const dFallenHead = sdEllipse(x, y, 134, 266, 42, 32, -0.35);
-        const dTorso = sdSegment(x, y, 158, 315, 315, 425) - 52;
-        const dArm = sdSegment(x, y, 155, 342, 265, 595) - 28;
-        const dFallen = smin(dFallenHead, smin(dTorso, dArm, 22), 18);
-
-        if (dFallen < 3) {
-          const m = smoothstep(3, -4, dFallen);
-          // Верхний край тела ярко освещён золотым светом лёгких, нижний уходит в глубокую берлинскую лазурь
-          const topLight = smoothstep(420, 235, y) * smoothstep(105, 245, x);
-          const prussianBlueR = mix(18, 242, topLight * 0.9 + n2 * 0.15);
-          const prussianBlueG = mix(34, 205, topLight * 0.85 + n2 * 0.15);
-          const prussianBlueB = mix(78, 165, topLight * 0.65 + (1 - topLight) * 0.45);
-
-          r = mix(r, prussianBlueR, m);
-          g = mix(g, prussianBlueG, m);
-          b = mix(b, prussianBlueB, m);
-        }
-      } else if (scene === "cousteau_grin") {
-        // ====================================================================
-        // ХОЛСТ III: УХМЫЛКА КУСТО / THE EXPRESSION (по мотивам портрета Гарри)
-        // ====================================================================
-        // Светлый кремово-зелёный импасто-фон с диагональными охристыми полосами
-        const diag = Math.sin((x + y) * 0.028 + n1 * 1.2);
-        r = mix(198, 228, smoothstep(-0.4, 0.6, diag));
-        g = mix(154, 226, smoothstep(-0.2, 0.7, diag));
-        b = mix(82, 195, smoothstep(0.0, 0.8, diag));
-
-        // Скульптура головы, бакенбардов и оливково-зелёного пиджака
-        const dFace = sdEllipse(x, y, 192, 305, 68, 86, 0.04);
-        const dMuttonL = sdEllipse(x, y, 132, 348, 28, 48, -0.18);
-        const dMuttonR = sdEllipse(x, y, 252, 355, 26, 46, 0.18);
-        const dMustache = sdEllipse(x, y, 194, 368, 46, 18, 0.04);
-        const dHairTop = sdEllipse(x, y, 194, 212, 74, 44, -0.05);
-        const dCoat = sdEllipse(x, y, 192, 565, 165, 145, 0);
-
-        if (dCoat < 2) {
-          const m = smoothstep(2, -4, dCoat);
-          // Оливково-зелёный пиджак и острый белый диско-воротник
-          const dCollar = Math.min(
-            sdSegment(x, y, 148, 445, 118, 545) - 18,
-            sdSegment(x, y, 236, 445, 262, 545) - 18
-          );
-          if (dCollar < 2) {
-            r = mix(r, 218, m);
-            g = mix(g, 224, m);
-            b = mix(b, 214, m);
-          } else {
-            r = mix(r, 44 + n2 * 22, m);
-            g = mix(g, 64 + n2 * 28, m);
-            b = mix(b, 32 + n2 * 14, m);
-          }
-        }
-
-        const dFullHead = smin(dFace, smin(dMuttonL, dMuttonR, 16), 12);
-        if (dFullHead < 2) {
-          const m = smoothstep(2, -4, dFullHead);
-          // Базовый серо-телесный тон с похмельным румянцем в центре лица (нос и щёки)
-          const rosacea = Math.exp(-Math.hypot(x - 194, y - 325) * 0.025);
-          // Фирменный чисто-белый блик мастихином на лбу (188, 248)
-          const foreheadSpec = smoothstep(32, 4, Math.hypot(x - 188, y - 248));
-
-          let fr = mix(178, 192, rosacea) + foreheadSpec * 75;
-          let fg = mix(164, 78, rosacea * 0.75) + foreheadSpec * 85;
-          let fb = mix(154, 64, rosacea * 0.8) + foreheadSpec * 88;
-
-          // Прищуренные глаза
-          const dEyeL = sdEllipse(x, y, 164, 302, 16, 6, 0.12);
-          const dEyeR = sdEllipse(x, y, 226, 308, 15, 6, -0.1);
-          if (dEyeL < 3 || dEyeR < 3) {
-            fr *= 0.28;
-            fg *= 0.22;
-            fb *= 0.22;
-          }
-
-          // Ухмылка с полоской зубов
-          const dSmile = sdEllipse(x, y, 194, 388, 24, 9, 0.06);
-          if (dSmile < 1) {
-            fr = 235;
-            fg = 230;
-            fb = 220;
-          }
-
-          // Тёмно-каштановые бакенбарды, усы и растрёпанная шевелюра
-          const hairDist = Math.min(
-            Math.min(dMuttonL, dMuttonR),
-            Math.min(dMustache, dHairTop)
-          );
-          if (hairDist < 3) {
-            const hm = smoothstep(3, -4, hairDist);
-            fr = mix(fr, 38 + n2 * 25, hm);
-            fg = mix(fg, 24 + n2 * 16, hm);
-            fb = mix(fb, 19 + n2 * 12, hm);
-          }
-
-          r = mix(r, fr, m);
-          g = mix(g, fg, m);
-          b = mix(b, fb, m);
-        }
-      } else {
-        // ====================================================================
-        // ХОЛСТ IV: ХАРДКОР В ЦЕРКВИ // КИМ, ВИТРАЖ И ЛАЗЕРЫ (image_54817e)
-        // ====================================================================
-        r = mix(22, 45, n1);
-        g = mix(28, 38, n1);
-        b = mix(38, 24, n1);
-
-        // Золотой витраж Долорес Дей в верхней правой части холста
-        const dWindow = sdEllipse(x, y, 245, 175, 95, 165, 0.12);
-        if (dWindow < 15) {
-          const wm = smoothstep(15, -10, dWindow);
-          r = mix(r, 228, wm * 0.85);
-          g = mix(g, 178, wm * 0.8);
-          b = mix(b, 92, wm * 0.65);
-        }
-
-        // Силуэт Кима Кицураги на переднем плане в ярко-оранжевом бомбере
-        const dKimJacket = sdEllipse(x, y, 128, 335, 76, 95, -0.15);
-        const dKimHead = sdEllipse(x, y, 108, 202, 32, 38, -0.1);
-        const dKimPants = sdEllipse(x, y, 138, 535, 68, 135, 0.08);
-
-        if (dKimPants < 3) {
-          const m = smoothstep(3, -4, dKimPants);
-          r = mix(r, 24, m);
-          g = mix(g, 28, m);
-          b = mix(b, 34, m);
-        }
-        if (dKimJacket < 3) {
-          const m = smoothstep(3, -4, dKimJacket);
-          r = mix(r, 228 + n2 * 25, m);
-          g = mix(g, 88 + n2 * 20, m);
-          b = mix(b, 28, m);
-        }
-        if (dKimHead < 3) {
-          const m = smoothstep(3, -4, dKimHead);
-          r = mix(r, 198, m);
-          g = mix(g, 142, m);
-          b = mix(b, 102, m);
-          // Светящиеся круглые очки Кима
-          const dGlasses = Math.min(
-            Math.hypot(x - 98, y - 204) - 9,
-            Math.hypot(x - 120, y - 200) - 9
-          );
-          if (dGlasses < 1.5) {
-            r = 215;
-            g = 248;
-            b = 255;
-          }
-        }
-
-        // Неоново-голубые лазерные лучи, рассекающие церковь по диагоналям
-        const dLaser1 = sdSegment(x, y, 0, 85, W, 345);
-        const dLaser2 = sdSegment(x, y, 85, 0, W, 540);
-        const dLaser3 = sdSegment(x, y, 0, 495, W, 245);
-        const dMinLaser = Math.min(dLaser1, Math.min(dLaser2, dLaser3));
-        const laserGlow = Math.exp(-dMinLaser * 0.14);
-        r += laserGlow * 65;
-        g += laserGlow * 225;
-        b += laserGlow * 255;
-      }
-
-      rawBuf[idx] = clamp(r, 0, 255);
-      rawBuf[idx + 1] = clamp(g, 0, 255);
-      rawBuf[idx + 2] = clamp(b, 0, 255);
-    }
-  }
-
-  // ==========================================================================
-  // ПРОХОД 2: АНИЗОТРОПНЫЙ ФИЛЬТР МАСЛЯНОГО МАЗКА КУВАХАРЫ + РЕЛЬЕФ КРАСКИ (IMPASTO)
-  // Превращает гладкие градиенты в настоящие густые мазки кисти с бликом на гребне!
-  // ==========================================================================
-  const imgData = ctx.createImageData(W, H);
-  const out = imgData.data;
-
-  for (let y = 2; y < H - 2; y++) {
-    for (let x = 2; x < W - 2; x++) {
-      // Направление мазка кисти следует за вихревым полем картины
-      const flowAngle = fbm(x * 0.025, y * 0.025) * Math.PI * 2.0;
-      const dx = Math.round(Math.cos(flowAngle) * 2);
-      const dy = Math.round(Math.sin(flowAngle) * 2);
-
-      const cIdx = (y * W + x) * 3;
-      const fIdx = ((y + dy) * W + (x + dx)) * 3;
-      const bIdx = ((y - dy) * W + (x - dx)) * 3;
-
-      // Усреднение вдоль волокон кисти + расчёт рельефа краски (Impasto specular ridge)
-      const mr = (rawBuf[cIdx] * 2 + rawBuf[fIdx] + rawBuf[bIdx]) * 0.25;
-      const mg = (rawBuf[cIdx + 1] * 2 + rawBuf[fIdx + 1] + rawBuf[bIdx + 1]) * 0.25;
-      const mb = (rawBuf[cIdx + 2] * 2 + rawBuf[fIdx + 2] + rawBuf[bIdx + 2]) * 0.25;
-
-      // Гребень мазка мастихина (производная яркости поперёк мазка)
-      const ridge = (rawBuf[fIdx] - rawBuf[bIdx]) * 0.18;
-      // Текстура переплетения нитей льняного холста
-      const weave = ((x % 3 === 0 ? 1 : -1) + (y % 3 === 0 ? 1 : -1)) * 1.8;
-
-      const outIdx = (y * W + x) * 4;
-      out[outIdx] = clamp(mr + ridge + weave, 0, 255);
-      out[outIdx + 1] = clamp(mg + ridge + weave, 0, 255);
-      out[outIdx + 2] = clamp(mb + ridge + weave, 0, 255);
-      out[outIdx + 3] = 255;
-    }
-  }
-
-  ctx.putImageData(imgData, 0, 0);
-}
-
-// Компонент витрины: показывает ваш оригинал (если загружен через Ctrl+V / public), иначе — масляный шейдер
-function ArtworkShowcase({
-  slot,
-  onPastePrompt,
-}: {
-  slot: ArtworkSlot;
-  onPastePrompt: () => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [repoImgValid, setRepoImgValid] = useState<boolean>(false);
-
-  // Проверяем, положил ли пользователь файл /art1.jpg..art4.jpg в папку public/
-  useEffect(() => {
-    if (slot.customDataUrl) return;
-    let active = true;
-    const testImg = new Image();
-    testImg.onload = () => {
-      if (active) setRepoImgValid(true);
-    };
-    testImg.onerror = () => {
-      if (active) setRepoImgValid(false);
-    };
-    testImg.src = slot.repoPath;
-    return () => {
-      active = false;
-    };
-  }, [slot.repoPath, slot.customDataUrl]);
-
-  useEffect(() => {
-    if (slot.customDataUrl || repoImgValid) return;
-    if (canvasRef.current) {
-      renderOilShaderToCanvas(canvasRef.current, slot.scene);
-    }
-  }, [slot.scene, slot.customDataUrl, repoImgValid]);
-
-  const activeImageSrc = slot.customDataUrl || (repoImgValid ? slot.repoPath : null);
-
-  return (
-    <div style={{ width: "100%", height: "100%", position: "relative", background: "#0e0c0a" }}>
-      {activeImageSrc ? (
-        <img
-          src={activeImageSrc}
-          alt={slot.title}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            objectPosition: "center top",
-            display: "block",
-          }}
-        />
-      ) : (
-        <canvas
-          ref={canvasRef}
-          width={380}
-          height={736}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-          }}
-        />
-      )}
-
-      <div
-        style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          padding: "8px 10px",
-          background: "linear-gradient(0deg, rgba(10, 9, 8, 0.92) 0%, transparent 100%)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          fontSize: "11px",
-          color: "#cbbba0",
-        }}
-      >
-        <span>{slot.title} (Ctrl+V — вставить арт)</span>
-        <button
-          onClick={onPastePrompt}
-          style={{
-            background: "rgba(24, 20, 17, 0.85)",
-            border: "1px solid rgba(212, 163, 89, 0.45)",
-            color: "#f3ead8",
-            padding: "2px 8px",
-            fontSize: "11px",
-            cursor: "pointer",
-          }}
-        >
-          Выбрать файл...
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// 5. БАЗА ДАННЫХ НАКОПИТЕЛЕЙ И РЕПЛИК DISCO ELYSIUM
+// 4. ПРОФИЛИ НАКОПИТЕЛЕЙ И РЕПЛИКИ НАВЫКОВ DISCO ELYSIUM
 // ============================================================================
 
 const INITIAL_DRIVES: DriveProfile[] = [
@@ -1194,38 +630,14 @@ function parseRealSmartReport(rawText: string): DriveProfile | null {
 }
 
 // ============================================================================
-// 6. ГЛАВНЫЙ КОМПОНЕНТ (КАНОНИЧНАЯ РАСКЛАДКА + ВСТАВКА АРТОВ ПО CTRL+V)
+// 5. ГЛАВНЫЙ КОМПОНЕНТ (ЧИСТАЯ ВИТРИНА ПОД ВАШИ 4 ИЛЛЮСТРАЦИИ)
 // ============================================================================
 
 const INITIAL_SLOTS: ArtworkSlot[] = [
-  {
-    id: "slot_1",
-    title: "Холст I: Взрыв (B' B'')",
-    scene: "mind_burst",
-    repoPath: "/art1.jpg",
-    customDataUrl: null,
-  },
-  {
-    id: "slot_2",
-    title: "Холст II: Пьета Долорес",
-    scene: "dolores_lungs",
-    repoPath: "/art2.jpg",
-    customDataUrl: null,
-  },
-  {
-    id: "slot_3",
-    title: "Холст III: Ухмылка Кусто",
-    scene: "cousteau_grin",
-    repoPath: "/art3.jpg",
-    customDataUrl: null,
-  },
-  {
-    id: "slot_4",
-    title: "Холст IV: Церковь и лазеры",
-    scene: "church_beams",
-    repoPath: "/art4.jpg",
-    customDataUrl: null,
-  },
+  { id: "slot_1", title: "Холст I", repoPath: "/art1.jpg", customDataUrl: null },
+  { id: "slot_2", title: "Холст II", repoPath: "/art2.jpg", customDataUrl: null },
+  { id: "slot_3", title: "Холст III", repoPath: "/art3.jpg", customDataUrl: null },
+  { id: "slot_4", title: "Холст IV", repoPath: "/art4.jpg", customDataUrl: null },
 ];
 
 export default function CrystalDiskElysiumEdition() {
@@ -1234,6 +646,7 @@ export default function CrystalDiskElysiumEdition() {
 
   const [artSlots, setArtSlots] = useState<ArtworkSlot[]>(INITIAL_SLOTS);
   const [activeSlotIdx, setActiveSlotIdx] = useState<number>(0);
+  const [missingRepoFiles, setMissingRepoFiles] = useState<Record<string, boolean>>({});
 
   const [rawFormat, setRawFormat] = useState<"HEX16" | "DEC10">("HEX16");
   const [selectedAttrId, setSelectedAttrId] = useState<string>("01");
@@ -1247,17 +660,17 @@ export default function CrystalDiskElysiumEdition() {
   const [thoughts, setThoughts] = useState<DialogueMessage[]>([
     {
       id: "init_1",
-      skill: "КОНЦЕПТУАЛИЗАЦИЯ",
+      skill: "ЭНЦИКЛОПЕДИЯ",
       category: "INT",
-      difficulty: "Сложно: Успех",
-      text: "Никаких чужих обложек с логотипами. Холст слева написан попиксельным масляным шейдером с рельефом мастихина, а если нажать Ctrl + V (или перетащить файлы), программа навсегда впитает твои собственные полотна.",
+      difficulty: "Легко: Успех",
+      text: "Регистр 01h стандарта NVM Express хранит битовую маску аварийных флагов: деградацию резервных блоков, тепловой пробой и аварийную блокировку записи. Все биты равны нулю.",
     },
     {
       id: "init_2",
       skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
       category: "PSY",
       difficulty: "Средне: Успех",
-      text: "Выбери любую строку в ведомости S.M.A.R.T., чтобы услышать голоса внутри контроллера.",
+      text: "Кликни по любой строке S.M.A.R.T. для чтения регистра. Чтобы поставить свои 4 арта — перетащи их сюда мышкой, нажми Ctrl + V или положи в папку public/ репозитория как art1.jpg – art4.jpg.",
     },
   ]);
 
@@ -1275,7 +688,7 @@ export default function CrystalDiskElysiumEdition() {
     });
   }, []);
 
-  // Поддержка вставки картинки прямо из буфера обмена по Ctrl + V в любом месте окна!
+  // Вставка картинки по Ctrl + V прямо в активный слот
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
@@ -1324,6 +737,9 @@ export default function CrystalDiskElysiumEdition() {
 
   const activeDrive = drives[activeDriveIdx] || drives[0];
   const currentArtSlot = artSlots[activeSlotIdx] || artSlots[0];
+  const activeArtSrc =
+    currentArtSlot.customDataUrl ||
+    (!missingRepoFiles[currentArtSlot.repoPath] ? currentArtSlot.repoPath : null);
 
   const handleArtFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -1353,9 +769,6 @@ export default function CrystalDiskElysiumEdition() {
     const drv = drives[idx];
     setActiveDriveIdx(idx);
     soundFX.playRelayClick();
-
-    if (drv.healthStatus === "BAD") setActiveSlotIdx(1); // Пьета Долорес
-    else if (drv.healthStatus === "CAUTION") setActiveSlotIdx(0); // Взрыв B' B''
 
     setThoughts([
       {
@@ -1516,14 +929,15 @@ export default function CrystalDiskElysiumEdition() {
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 16px;
+          padding: 14px;
           background: #090807;
         }
 
+        /* ОКНО НАТИВНОЙ УТИЛИТЫ (БЕЗ ОБРЕЗКИ НИЖНЕГО КРАЯ) */
         .cdi-window-frame {
           width: 100%;
           max-width: 1180px;
-          height: 790px;
+          min-height: 760px;
           position: relative;
           display: flex;
           flex-direction: column;
@@ -1532,11 +946,18 @@ export default function CrystalDiskElysiumEdition() {
           box-shadow: 0 28px 80px rgba(0, 0, 0, 0.92);
           overflow: hidden;
         }
-        @media (max-width: 1024px) {
-          .cdi-window-frame {
-            height: auto;
-            min-height: 820px;
-          }
+
+        /* Мягкая подсветка правой стеклянной панели цветами активного арта */
+        .ambient-backdrop-img {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          filter: blur(34px) saturate(1.35) brightness(0.32);
+          transform: scale(1.08);
+          pointer-events: none;
+          z-index: 0;
         }
 
         .win-titlebar {
@@ -1592,13 +1013,13 @@ export default function CrystalDiskElysiumEdition() {
         .canvas-slots {
           display: flex;
           align-items: center;
-          gap: 3px;
+          gap: 4px;
         }
         .slot-btn {
           background: transparent;
           border: 1px solid transparent;
           color: #9e9383;
-          padding: 2px 8px;
+          padding: 2px 9px;
           font-size: 11px;
           cursor: pointer;
         }
@@ -1617,7 +1038,6 @@ export default function CrystalDiskElysiumEdition() {
           flex: 1;
           display: grid;
           grid-template-columns: 380px 1fr;
-          overflow: hidden;
         }
         @media (max-width: 1024px) {
           .cdi-main-split {
@@ -1625,24 +1045,24 @@ export default function CrystalDiskElysiumEdition() {
           }
         }
 
+        /* Левая витрина под иллюстрацию */
         .left-artwork-pane {
           position: relative;
-          height: 100%;
-          min-height: 520px;
           border-right: 1px solid rgba(255, 255, 255, 0.12);
           background: #0e0c0a;
           overflow: hidden;
+          display: flex;
+          flex-direction: column;
         }
 
+        /* Правая панель данных CrystalDiskInfo */
         .right-data-pane {
-          background:
-            radial-gradient(circle at 15% 20%, rgba(194, 125, 56, 0.08), transparent 45%),
-            rgba(18, 16, 14, 0.92);
-          padding: 10px 16px 12px 16px;
+          background: rgba(18, 16, 14, 0.76);
+          backdrop-filter: blur(14px);
+          padding: 10px 16px 14px 16px;
           display: flex;
           flex-direction: column;
           gap: 8px;
-          overflow: hidden;
         }
 
         .cdi-drive-strip {
@@ -1754,10 +1174,8 @@ export default function CrystalDiskElysiumEdition() {
         }
 
         .cdi-table-wrapper {
-          flex: 1;
           background: rgba(10, 9, 8, 0.68);
           border: 1px solid rgba(255, 255, 255, 0.16);
-          overflow-y: auto;
         }
         .cdi-smart-table {
           width: 100%;
@@ -1765,8 +1183,6 @@ export default function CrystalDiskElysiumEdition() {
           font-size: 12px;
         }
         .cdi-smart-table th {
-          position: sticky;
-          top: 0;
           background: #1c1916;
           color: #ccc2b2;
           font-weight: 500;
@@ -1801,7 +1217,8 @@ export default function CrystalDiskElysiumEdition() {
         .dot-bad { background: #d1495b; }
 
         .zaum-dialogue-strip {
-          background: rgba(14, 12, 10, 0.94);
+          margin-top: auto;
+          background: rgba(14, 12, 10, 0.92);
           border: 1px solid rgba(212, 163, 89, 0.28);
           padding: 10px 14px;
           display: flex;
@@ -1810,13 +1227,13 @@ export default function CrystalDiskElysiumEdition() {
         }
         .zaum-paragraph {
           margin: 0;
-          font-size: 15.5px;
+          font-size: 15px;
           line-height: 1.42;
           color: #ede6d6;
         }
         .zaum-skill-name {
           font-family: 'Inter', sans-serif;
-          font-size: 12px;
+          font-size: 11.5px;
           font-weight: 700;
           letter-spacing: 0.06em;
           text-transform: uppercase;
@@ -1824,7 +1241,7 @@ export default function CrystalDiskElysiumEdition() {
         .zaum-check-meta {
           font-style: italic;
           color: #9e9383;
-          font-size: 14px;
+          font-size: 13.5px;
           margin: 0 6px;
         }
         .zaum-red-prompt {
@@ -1841,7 +1258,7 @@ export default function CrystalDiskElysiumEdition() {
           border: none;
           padding: 0;
           color: #d95338;
-          font-size: 15px;
+          font-size: 14.5px;
           font-weight: 600;
           cursor: pointer;
           text-align: left;
@@ -1877,13 +1294,16 @@ export default function CrystalDiskElysiumEdition() {
           }}
         >
           <div className="serif-zaum" style={{ fontSize: "26px", color: "#f3ead8" }}>
-            Отпустите ваши иллюстрации (можно сразу все 4 файла) для установки на холст
+            Отпустите ваши иллюстрации (можно сразу все 4 файла)
           </div>
         </div>
       )}
 
       {/* ОКНО CRYSTALDISKINFO SPECIAL EDITION */}
       <div className="cdi-window-frame">
+        {/* Размытая цветовая проекция текущего арта под правой стеклянной панелью */}
+        {activeArtSrc && <img src={activeArtSrc} alt="" className="ambient-backdrop-img" />}
+
         <div className="win-titlebar">
           <span>CrystalDiskInfo 9.8.0 Disco Elysium Edition x64</span>
           <div className="win-controls mono">
@@ -1911,7 +1331,7 @@ export default function CrystalDiskElysiumEdition() {
               Вид ({rawFormat === "HEX16" ? "HEX" : "DEC"})
             </button>
             <button onClick={() => fileInputRef.current?.click()} className="menu-link">
-              Холст (Загрузить арты...)
+              Холст (Выбрать 4 файла...)
             </button>
             <button
               onClick={() => {
@@ -1938,12 +1358,85 @@ export default function CrystalDiskElysiumEdition() {
         </nav>
 
         <div className="cdi-main-split">
-          {/* ЛЕВАЯ КОЛОНКА: МАСЛЯНЫЙ ШЕЙДЕР ИЛИ ВАШ ВСТАВЛЕННЫЙ ОРИГИНАЛ */}
+          {/* ЛЕВАЯ КОЛОНКА: ТОЛЬКО ОРИГИНАЛЬНЫЙ АРТ (БЕЗ ПРОЦЕДУРНОЙ МАЗНИ) */}
           <aside className="left-artwork-pane">
-            <ArtworkShowcase
-              slot={currentArtSlot}
-              onPastePrompt={() => fileInputRef.current?.click()}
-            />
+            {activeArtSrc ? (
+              <img
+                src={activeArtSrc}
+                alt={currentArtSlot.title}
+                onClick={() => fileInputRef.current?.click()}
+                onError={() =>
+                  setMissingRepoFiles((prev) => ({
+                    ...prev,
+                    [currentArtSlot.repoPath]: true,
+                  }))
+                }
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  objectPosition: "center top",
+                  display: "block",
+                  cursor: "pointer",
+                }}
+                title="Кликните, чтобы заменить иллюстрацию"
+              />
+            ) : (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "32px 24px",
+                  textAlign: "center",
+                  cursor: "pointer",
+                  background:
+                    "radial-gradient(circle at 50% 40%, rgba(42, 34, 28, 0.55), #0e0c0a 80%)",
+                }}
+              >
+                <div
+                  className="serif-zaum"
+                  style={{
+                    fontSize: "20px",
+                    color: "#d4a359",
+                    marginBottom: "10px",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  {currentArtSlot.title}
+                </div>
+                <p
+                  style={{
+                    fontSize: "12.5px",
+                    color: "#a89f91",
+                    lineHeight: 1.55,
+                    margin: "0 0 18px 0",
+                  }}
+                >
+                  Нажмите сюда, чтобы выбрать ваши 4 иллюстрации, перетащите их мышкой в окно или
+                  нажмите <strong className="mono">Ctrl + V</strong>.
+                  <br />
+                  <br />
+                  Для постоянной прошивки в GitHub положите файл в папку{" "}
+                  <span className="mono" style={{ color: "#e8e2d5" }}>
+                    public{currentArtSlot.repoPath}
+                  </span>
+                </p>
+                <span
+                  style={{
+                    padding: "6px 14px",
+                    border: "1px solid rgba(212, 163, 89, 0.5)",
+                    color: "#f3ead8",
+                    fontSize: "12px",
+                  }}
+                >
+                  Загрузить иллюстрации...
+                </span>
+              </div>
+            )}
           </aside>
 
           {/* ПРАВАЯ КОЛОНКА: ДАННЫЕ CRYSTALDISKINFO + СТРОКА ДИАЛОГА ZA/UM */}
@@ -2153,7 +1646,8 @@ export default function CrystalDiskElysiumEdition() {
 
               <div className="zaum-red-prompt">
                 <button onClick={handleRollDice} className="zaum-choice-link serif-zaum">
-                  1. [ИНТЕРФЕЙС: Белая проверка 2d6] Прослушать контроллер накопителя {activeDrive.letter}
+                  1. [ИНТЕРФЕЙС: Белая проверка 2d6] Прослушать контроллер накопителя{" "}
+                  {activeDrive.letter}
                 </button>
                 <span className="mono" style={{ fontSize: "11px", color: "#8c8273" }}>
                   Кости: {lastDice[0]} + {lastDice[1]}
@@ -2186,7 +1680,10 @@ export default function CrystalDiskElysiumEdition() {
               padding: "20px",
             }}
           >
-            <h3 className="serif-zaum" style={{ margin: "0 0 8px 0", fontSize: "20px", color: "#f3ead8" }}>
+            <h3
+              className="serif-zaum"
+              style={{ margin: "0 0 8px 0", fontSize: "20px", color: "#f3ead8" }}
+            >
               Импорт текстового отчёта CrystalDiskInfo (`Ctrl + C`)
             </h3>
             <textarea
