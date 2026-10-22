@@ -1,0 +1,51 @@
+name: Build Desktop (EXE, DEB, DMG)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build_desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform_name: Windows-EXE
+          - os: ubuntu-latest
+            platform_name: Linux-DEB
+          - os: macos-latest
+            platform_name: macOS-DMG
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Build Next.js static bundle & package Electron app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run desktop:pack
+
+      - name: Upload installers (.exe, .deb, .dmg)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CrystalDisk-Elysium-${{ matrix.platform_name }}
+          path: |
+            dist/*.exe
+            dist/*.deb
+            dist/*.AppImage
+            dist/*.dmg
+          if-no-files-found: ignore
