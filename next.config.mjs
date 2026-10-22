@@ -1,10 +1,6 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next'; // <-- Fails on '{' in .mjs!
 
 const nextConfig: NextConfig = {
-  output: "export",
-  images: {
-    unoptimized: true,
-  },
+  /* config options */
 };
-
 export default nextConfig;
