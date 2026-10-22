@@ -1,28 +1,58 @@
 {
-  "name": "ted",
-  "version": "0.1.0",
+  "name": "crystaldisk-disco-elysium",
+  "version": "1.0.0",
+  "description": "CrystalDiskInfo 9.8.0 Disco Elysium Edition (S.M.A.R.T. Utility)",
+  "author": "Revachol Citizens Militia",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "desktop:pack": "next build && electron-builder --publish never"
   },
   "dependencies": {
-    "lucide-react": "^1.57.0",
-    "next": "16.4.0",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "recharts": "^3.10.1"
+    "lucide-react": "^1.16.0",
+    "next": "16.0.1",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "recharts": "^3.8.0"
   },
   "devDependencies": {
-    "@tailwindcss/turbopack": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.4.0",
-    "tailwindcss": "^4",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8",
     "typescript": "^5"
+  },
+  "build": {
+    "appId": "org.revachol.crystaldisk.elysium",
+    "productName": "CrystalDiskInfo Disco Elysium",
+    "files": [
+      "out/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "deb",
+        "AppImage"
+      ],
+      "category": "System",
+      "maintainer": "Revachol Precinct 41 <rcm@revachol.org>"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.utilities"
+    }
   }
 }
