@@ -47,6 +47,7 @@ interface DriveProfile {
   powerOnCount: number;
   powerOnHours: number;
   rotationRate: string;
+  isRealHardware?: boolean;
   attributes: SmartAttribute[];
 }
 
@@ -58,8 +59,13 @@ interface DialogueMessage {
   text: string;
 }
 
+interface ElectronSmartBridge {
+  getRealDrives: () => Promise<DriveProfile[]>;
+  windowControl: (action: "minimize" | "maximize" | "close") => void;
+}
+
 // ============================================================================
-// 2. ЛОКАЛЬНАЯ БАЗА INDEXEDDB + УПАКОВЩИК ФАЙЛА ARTWORKS.TS ДЛЯ GITHUB
+// 2. ЛОКАЛЬНАЯ БАЗА INDEXEDDB ДЛЯ ПОЛЬЗОВАТЕЛЬСКИХ ХОЛСТОВ
 // ============================================================================
 
 const DB_NAME = "DiscoCdiGitVault";
@@ -111,7 +117,6 @@ async function loadSlotsFromDB(): Promise<Record<string, string>> {
   }
 }
 
-/** Оптимизирует картинку в WebP (высокое качество, ~45 КБ) для вшивания в artworks.ts */
 function convertFileToOptimizedWebP(file: File | Blob): Promise<string> {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -230,7 +235,6 @@ function WindowArtBackdrop({
     let animId: number;
     let frame = 0;
 
-    // 50 широких диагональных плоскостей мастихина в цвет выбранного арта
     const blocks = Array.from({ length: 50 }, (_, i) => ({
       x: 340 + ((i * 179) % 900),
       y: (i * 103) % 780,
@@ -241,7 +245,6 @@ function WindowArtBackdrop({
       alpha: 0.08 + (i % 4) * 0.025,
     }));
 
-    // Капли дождя Ревашоля по тёмному стеклу справа
     const rain = Array.from({ length: 45 }, (_, i) => ({
       x: 380 + ((i * 137) % 850),
       y: (i * 89) % 780,
@@ -257,7 +260,6 @@ function WindowArtBackdrop({
 
       ctx.clearRect(0, 0, W, H);
 
-      // 1. Мазки мастихина на заднике под правой панелью
       ctx.save();
       blocks.forEach((b) => {
         ctx.save();
@@ -270,7 +272,6 @@ function WindowArtBackdrop({
       });
       ctx.restore();
 
-      // 2. Тонкая радиолокационная сетка РГМ-41 позади таблицы S.M.A.R.T.
       ctx.save();
       ctx.strokeStyle = "rgba(226, 212, 190, 0.055)";
       ctx.lineWidth = 1;
@@ -290,7 +291,6 @@ function WindowArtBackdrop({
       ctx.stroke();
       ctx.restore();
 
-      // 3. Струи дождя по стеклу
       ctx.save();
       ctx.strokeStyle = palette[0];
       ctx.lineWidth = 1.15;
@@ -319,16 +319,14 @@ function WindowArtBackdrop({
 
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0, overflow: "hidden" }}>
-      {/* Глубокий цветовой подмалёвок в тон активной темы */}
       <div
         style={{
           position: "absolute",
           inset: 0,
-          background: `radial-gradient(circle at 28% 35%, ${palette[0]}44 0%, ${palette[1]}33 45\%,${palette[3]} 95%)`,
+          background: `radial-gradient(circle at 28% 35%, ${palette[0]}44 0%, ${palette[1]}33 45%, ${palette[3]} 95%)`,
         }}
       />
 
-      {/* Мягкая панорамная проекция самого арта под правую стеклянную часть окна */}
       {activeArtSrc && (
         <img
           src={activeArtSrc}
@@ -797,6 +795,7 @@ function parseRealSmartReport(rawText: string): DriveProfile | null {
     powerOnCount,
     powerOnHours,
     rotationRate: "---- (SSD)",
+    isRealHardware: true,
     attributes: parsedAttrs.length > 0 ? parsedAttrs : INITIAL_DRIVES[0].attributes,
   };
 }
@@ -832,10 +831,10 @@ export default function CrystalDiskElysiumEdition() {
     },
     {
       id: "init_2",
-      skill: "ИНТЕРФЕЙС",
-      category: "MOT",
-      difficulty: "Легко: Успех",
-      text: "Архитектура разделена на два файла: перетащи свои 4 референса в окно (или вставь по Ctrl + V) и нажми «Скачать готовый artworks.ts» в верхнем меню — получишь готовый файл с вшитыми артами для коммита в GitHub.",
+      skill: "ВНУТРЕННЯЯ ИМПЕРИЯ",
+      category: "PSY",
+      difficulty: "Средне: Успех",
+      text: "Кремний помнит всё, детектив. Выбери любую строку в ведомости S.M.A.R.T. или брось кости Белой проверки внизу, чтобы прослушать пульс накопителя.",
     },
   ]);
 
@@ -844,7 +843,6 @@ export default function CrystalDiskElysiumEdition() {
   const activeDrive = drives[activeDriveIdx] || drives[0];
   const currentTheme = themes[activeSlotIdx] || themes[0];
 
-  // Загружаем сохранённые арты из IndexedDB браузера
   useEffect(() => {
     loadSlotsFromDB().then((savedMap) => {
       setThemes((prev) =>
@@ -856,7 +854,6 @@ export default function CrystalDiskElysiumEdition() {
     });
   }, []);
 
-  // Поддержка Ctrl + V для мгновенной вставки любого скопированного арта
   useEffect(() => {
     const handlePaste = async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
@@ -880,11 +877,9 @@ export default function CrystalDiskElysiumEdition() {
     return () => window.removeEventListener("paste", handlePaste);
   }, [activeSlotIdx]);
 
-  // Автоподхват реальных дисков в Electron (.exe / .deb / .dmg)
-  useEffect(() => {
-    const win = window as unknown as {
-      electronSMART?: { getRealDrives: () => Promise<DriveProfile[]> };
-    };
+  // Функция опроса физических дисков в десктопной сборке Electron
+  const pollHardwareDrives = () => {
+    const win = window as unknown as { electronSMART?: ElectronSmartBridge };
     if (win.electronSMART && typeof win.electronSMART.getRealDrives === "function") {
       win.electronSMART
         .getRealDrives()
@@ -892,13 +887,24 @@ export default function CrystalDiskElysiumEdition() {
           if (Array.isArray(realDrives) && realDrives.length > 0) {
             setDrives([...realDrives, ...INITIAL_DRIVES]);
             setActiveDriveIdx(0);
+            soundFX.playClick();
           }
         })
         .catch(() => {});
     }
+  };
+
+  useEffect(() => {
+    pollHardwareDrives();
   }, []);
 
-  // Загрузка от 1 до 4 файлов сразу через Drag & Drop или диалог выбора
+  const handleWindowControl = (action: "minimize" | "maximize" | "close") => {
+    const win = window as unknown as { electronSMART?: ElectronSmartBridge };
+    if (win.electronSMART && typeof win.electronSMART.windowControl === "function") {
+      win.electronSMART.windowControl(action);
+    }
+  };
+
   const handleArtFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const list = Array.from(files).slice(0, 4);
@@ -913,32 +919,6 @@ export default function CrystalDiskElysiumEdition() {
       );
       if (i === 0) setActiveSlotIdx(targetIdx);
     }
-    soundFX.playChord(true);
-  };
-
-  // ГЕНЕРАЦИЯ И СКАЧИВАНИЕ ГОТОВОГО ФАЙЛА app/artworks.ts С ВШИТЫМИ КАРТИНКАМИ ДЛЯ GITHUB
-  const exportArtworksTsFile = () => {
-    const fileContent = [
-      `export interface DiscoThemeConfig {`,
-      `  id: string;`,
-      `  title: string;`,
-      `  subtitle: string;`,
-      `  repoPath: string;`,
-      `  embeddedDataUrl: string;`,
-      `  palette: [string, string, string, string];`,
-      `}`,
-      ``,
-      `export const DISCO_THEMES: DiscoThemeConfig[] = ${JSON.stringify(themes, null, 2)};`,
-      ``,
-    ].join("\n");
-
-    const blob = new Blob([fileContent], { type: "text/typescript;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "artworks.ts";
-    a.click();
-    URL.revokeObjectURL(url);
     soundFX.playChord(true);
   };
 
@@ -962,10 +942,10 @@ export default function CrystalDiskElysiumEdition() {
         difficulty: "Средне: Успех",
         text:
           drv.healthStatus === "GOOD"
-            ? `Подключён накопитель [${drv.letter}] ${drv.model}. Четыре линии PCIe 4.0 работают штатно, остаточный ресурс 96%.`
+            ? `Подключён накопитель [${drv.letter}] ${drv.model}. Линии PCIe 4.0 работают штатно, остаточный ресурс ${drv.healthPercent}%.`
             : drv.healthStatus === "CAUTION"
-            ? `На накопителе [${drv.letter}] зафиксированы 48 переназначенных секторов (05h) и 14 нестабильных блоков (C5h).`
-            : `Критический износ магнитной поверхности [${drv.letter}]: здоровье 11%, таблица дефектов G-List переполнена (2418 секторов).`,
+            ? `На накопителе [${drv.letter}] зафиксированы переназначенные сектора и нестабильные блоки.`
+            : `Критический износ магнитной поверхности [${drv.letter}]: здоровье ${drv.healthPercent}%, таблица дефектов G-List переполнена.`,
       },
     ]);
   };
@@ -1116,7 +1096,7 @@ export default function CrystalDiskElysiumEdition() {
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 14px;
+          padding: 10px;
           position: relative;
           transition: background 0.4s ease;
         }
@@ -1150,33 +1130,50 @@ export default function CrystalDiskElysiumEdition() {
           font-size: 12px;
           color: #d4cbbd;
           user-select: none;
+          -webkit-app-region: drag;
         }
         .win-controls {
           display: flex;
-          gap: 16px;
-          color: #8c8273;
+          gap: 4px;
+          -webkit-app-region: no-drag;
+        }
+        .win-ctrl-btn {
+          background: transparent;
+          border: none;
+          color: #9e9484;
+          width: 26px;
+          height: 22px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
           font-size: 12px;
+        }
+        .win-ctrl-btn:hover {
+          background: rgba(255, 255, 255, 0.1);
+          color: #fff;
+        }
+        .win-ctrl-close:hover {
+          background: #c83232;
+          color: #fff;
         }
 
         .win-menubar {
           position: relative;
           z-index: 20;
-          min-height: 29px;
+          height: 29px;
           background: rgba(20, 17, 25, 0.92);
           backdrop-filter: blur(10px);
           border-bottom: 1px solid rgba(212, 163, 89, 0.25);
-          padding: 2px 8px;
+          padding: 0 8px;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          flex-wrap: wrap;
-          gap: 6px;
         }
         .menu-left {
           display: flex;
           align-items: center;
           gap: 2px;
-          flex-wrap: wrap;
         }
         .menu-link {
           background: transparent;
@@ -1191,21 +1188,10 @@ export default function CrystalDiskElysiumEdition() {
           background: rgba(255, 255, 255, 0.08);
           color: #fff;
         }
-        .menu-link-git {
-          background: rgba(212, 163, 89, 0.16);
-          border: 1px solid rgba(212, 163, 89, 0.5);
-          color: #f4d38a;
-          font-weight: 600;
-        }
-        .menu-link-git:hover {
-          background: rgba(212, 163, 89, 0.3);
-          color: #fff;
-        }
         .canvas-slots {
           display: flex;
           align-items: center;
           gap: 4px;
-          flex-wrap: wrap;
         }
         .slot-btn {
           background: rgba(255, 255, 255, 0.03);
@@ -1280,6 +1266,7 @@ export default function CrystalDiskElysiumEdition() {
         .drive-tabs-group {
           display: flex;
           gap: 5px;
+          flex-wrap: wrap;
         }
         .cdi-drive-tab {
           padding: 4px 14px;
@@ -1510,14 +1497,13 @@ export default function CrystalDiskElysiumEdition() {
           }}
         >
           <div className="serif-zaum" style={{ fontSize: "26px", color: "#f3ead8" }}>
-            Отпустите ваши 4 иллюстрации — они упакуются в слоты I–IV
+            Отпустите ваши иллюстрации для установки на холст
           </div>
         </div>
       )}
 
       {/* ОКНО CRYSTALDISKINFO SPECIAL EDITION */}
       <div className="cdi-window-frame">
-        {/* ПАНОРАМНЫЙ ЗАДНИК ОКНА */}
         <WindowArtBackdrop
           activeArtSrc={activeArtSrc}
           palette={currentTheme.palette}
@@ -1527,9 +1513,27 @@ export default function CrystalDiskElysiumEdition() {
         <div className="win-titlebar">
           <span>CrystalDiskInfo 9.8.0 Disco Elysium Edition x64</span>
           <div className="win-controls mono">
-            <span>─</span>
-            <span>□</span>
-            <span>×</span>
+            <button
+              onClick={() => handleWindowControl("minimize")}
+              className="win-ctrl-btn"
+              title="Свернуть"
+            >
+              ─
+            </button>
+            <button
+              onClick={() => handleWindowControl("maximize")}
+              className="win-ctrl-btn"
+              title="Развернуть"
+            >
+              □
+            </button>
+            <button
+              onClick={() => handleWindowControl("close")}
+              className="win-ctrl-btn win-ctrl-close"
+              title="Закрыть"
+            >
+              ×
+            </button>
           </div>
         </div>
 
@@ -1541,8 +1545,8 @@ export default function CrystalDiskElysiumEdition() {
             <button onClick={copySmartReport} className="menu-link">
               Правка
             </button>
-            <button onClick={handleRollDice} className="menu-link">
-              Сервис
+            <button onClick={pollHardwareDrives} className="menu-link" title="Переопросить физические диски системы">
+              Диск (Обновить)
             </button>
             <button
               onClick={() => setRawFormat((p) => (p === "HEX16" ? "DEC10" : "HEX16"))}
@@ -1551,14 +1555,7 @@ export default function CrystalDiskElysiumEdition() {
               Вид ({rawFormat === "HEX16" ? "HEX" : "DEC"})
             </button>
             <button onClick={() => fileInputRef.current?.click()} className="menu-link">
-              Загрузить 4 арта (или Ctrl+V)
-            </button>
-            <button
-              onClick={exportArtworksTsFile}
-              className="menu-link menu-link-git"
-              title="Скачать готовый файл app/artworks.ts со всеми 4 вшитыми картинками для GitHub"
-            >
-              💾 Скачать готовый artworks.ts для Git
+              Холст
             </button>
             <button
               onClick={() => {
@@ -1588,7 +1585,6 @@ export default function CrystalDiskElysiumEdition() {
         </nav>
 
         <div className="cdi-main-split">
-          {/* ЛЕВАЯ КОЛОНКА: ВИТРИНА ИЛЛЮСТРАЦИИ ИЗ ФАЙЛА ARTWORKS.TS */}
           <aside className="left-artwork-pane">
             {activeArtSrc ? (
               <img
@@ -1612,7 +1608,7 @@ export default function CrystalDiskElysiumEdition() {
                   display: "block",
                   cursor: "pointer",
                 }}
-                title="Нажмите, чтобы выбрать файлы иллюстраций"
+                title="Нажмите, чтобы сменить иллюстрацию"
               />
             ) : (
               <div
@@ -1646,18 +1642,6 @@ export default function CrystalDiskElysiumEdition() {
                 >
                   {currentTheme.subtitle}
                 </div>
-                <p style={{ fontSize: "12.5px", color: "#a89f91", lineHeight: 1.55, margin: "0 0 18px 0" }}>
-                  1. Выдели свои 4 арта и перетащи их в это окно (или нажми{" "}
-                  <strong className="mono" style={{ color: "#fff" }}>
-                    Ctrl + V
-                  </strong>
-                  ).
-                  <br />
-                  2. Нажми сверху{" "}
-                  <strong style={{ color: "#f4d38a" }}>«💾 Скачать готовый artworks.ts»</strong> и
-                  замени им файл <span className="mono">app/artworks.ts</span> в GitHub — все 4
-                  картины навсегда станут частью кода репозитория!
-                </p>
                 <span
                   style={{
                     padding: "6px 14px",
@@ -1666,7 +1650,7 @@ export default function CrystalDiskElysiumEdition() {
                     fontSize: "12px",
                   }}
                 >
-                  Выбрать 4 файла иллюстраций...
+                  Выбрать иллюстрацию (или Ctrl+V)...
                 </span>
               </div>
             )}
@@ -1689,7 +1673,6 @@ export default function CrystalDiskElysiumEdition() {
             </div>
           </aside>
 
-          {/* ПРАВАЯ КОЛОНКА: ДАННЫЕ CRYSTALDISKINFO ПОВЕРХ ЖИВОПИСНОГО ЗАДНИКА */}
           <main className="right-data-pane">
             <div className="cdi-drive-strip">
               <div className="drive-tabs-group">
